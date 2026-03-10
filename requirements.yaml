@@ -1,0 +1,54 @@
+# Job filtering requirements for the CV evaluation module.
+# Edit this file to match your personal preferences before running run_evaluator.py.
+#
+# Pre-screening filters are applied WITHOUT any LLM calls.
+# Only jobs that pass ALL filters are sent to the LLM for scoring.
+#
+# Use empty lists ([]) to disable a filter entirely (allow all values).
+
+filters:
+
+  # Accepted contract types — matched against the `contract_type` DB column.
+  # Common values seen on pharmiweb.jobs: "Permanent", "Contract"
+  contract_types:
+    - Permanent
+
+  # Accepted working hours — matched against the `hours` DB column.
+  # Common values: "Full Time", "Part Time"
+  hours:
+    - Full Time
+
+  # Location keywords — at least ONE must appear in the `location` column (case-insensitive).
+  # Leave empty to allow any location (including on-site only).
+  location_keywords:
+    - Homeworking
+    - Remote
+    - Hybrid
+    - Home
+
+  # Accepted experience levels — matched against the `experience_level` DB column.
+  # Common values: "Entry level", "Graduate", "Experienced (non-manager)",
+  #                "Management", "Senior Management", "Director/Executive"
+  experience_levels:
+    - Experienced (non-manager)
+    - Management
+    - Senior Management
+
+  # Title keyword exclusions — if ANY of these appear in the job title (case-insensitive),
+  # the job is immediately rejected without an LLM call.
+  exclude_title_keywords:
+    - Intern
+    - Internship
+    - Apprentice
+    - Vice President
+    - Chief Executive
+    - Chief Financial
+
+scoring:
+  # Minimum score (0–100) for should_apply to be set to true.
+  should_apply_min_score: 70
+
+  # OpenAI model to use for scoring.
+  # This overrides the OPENAI_MODEL environment variable.
+  # Options: "gpt-4o-mini" (cheap, fast), "gpt-4o" (best quality)
+  model: gpt-4o-mini

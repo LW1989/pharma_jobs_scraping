@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# CV — personal data, never commit
+cv.txt
+
 # Python
 __pycache__/
 *.pyc
