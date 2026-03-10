@@ -155,50 +155,61 @@ def main() -> None:
     run_success = True
     error_message: str | None = None
 
-    logger.info("Step 3 – Evaluating jobs …")
+    logger.info("Step 3 – Evaluating %d jobs (pre-screen first, then LLM) …", jobs_total)
+
+    PROGRESS_EVERY = 50  # print a running summary every N jobs
 
     for i, job in enumerate(jobs, start=1):
         job_id = job["job_id"]
-        logger.info("  [%d/%d] job %s – %s", i, jobs_total, job_id, job.get("title", ""))
 
-        # --- Pre-screening ---
+        # --- Pre-screening (no LLM) ---
         passed, reason = prescreen(job, filters)
         if not passed:
-            logger.info("    → %s", reason)
+            # Keep pre-screen fails on a single concise line to avoid terminal flood
+            short_reason = reason.replace("Pre-screened out: ", "")
+            logger.info("  [%d/%d] SKIP  %s – %s | %s",
+                        i, jobs_total, job_id, job.get("title", "")[:50], short_reason)
             save_prescreening_fail(job_id, reason, cv_version)
             jobs_prefiltered += 1
-            continue
 
-        # --- LLM evaluation ---
-        try:
-            result = evaluate(job, cv_text, model, threshold)
-            save_evaluation(
-                job_id=job_id,
-                cv_version=cv_version,
-                score=result.score,
-                score_reasoning=result.score_reasoning,
-                should_apply=result.should_apply,
+        else:
+            # --- LLM evaluation ---
+            logger.info("  [%d/%d] LLM   %s – %s",
+                        i, jobs_total, job_id, job.get("title", "")[:60])
+            logger.info("         ↳ calling %s …", model)
+            try:
+                result = evaluate(job, cv_text, model, threshold)
+                save_evaluation(
+                    job_id=job_id,
+                    cv_version=cv_version,
+                    score=result.score,
+                    score_reasoning=result.score_reasoning,
+                    should_apply=result.should_apply,
+                )
+                total_tokens_input += result.tokens_input
+                total_tokens_output += result.tokens_output
+                jobs_evaluated += 1
+                running_cost = _estimate_cost(model, total_tokens_input, total_tokens_output)
+                if result.should_apply:
+                    jobs_should_apply += 1
+                    logger.info("         ↳ score=%d  ✓ APPLY  | cost so far $%.4f | %s",
+                                result.score, running_cost, result.score_reasoning[:80])
+                else:
+                    logger.info("         ↳ score=%d  – skip   | cost so far $%.4f | %s",
+                                result.score, running_cost, result.score_reasoning[:80])
+            except Exception as exc:
+                logger.warning("         ↳ LLM call FAILED for job %s: %s", job_id, exc)
+                run_success = False
+                error_message = str(exc)
+
+        # --- Periodic progress summary ---
+        if i % PROGRESS_EVERY == 0:
+            running_cost = _estimate_cost(model, total_tokens_input, total_tokens_output)
+            pct = i / jobs_total * 100
+            logger.info(
+                "  ── progress %d/%d (%.0f%%) │ skipped=%d │ llm=%d │ apply=%d │ cost=$%.4f ──",
+                i, jobs_total, pct, jobs_prefiltered, jobs_evaluated, jobs_should_apply, running_cost,
             )
-            total_tokens_input += result.tokens_input
-            total_tokens_output += result.tokens_output
-            jobs_evaluated += 1
-            if result.should_apply:
-                jobs_should_apply += 1
-                logger.info(
-                    "    → score=%d ✓ should_apply  | %s",
-                    result.score,
-                    result.score_reasoning[:80],
-                )
-            else:
-                logger.info(
-                    "    → score=%d   no apply      | %s",
-                    result.score,
-                    result.score_reasoning[:80],
-                )
-        except Exception as exc:
-            logger.warning("    → LLM call failed for job %s: %s", job_id, exc)
-            run_success = False
-            error_message = str(exc)
 
     # ------------------------------------------------------------------
     # Step 4: Write run record
