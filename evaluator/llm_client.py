@@ -214,7 +214,6 @@ def _call_api(model: str, system_prompt: str, user_prompt: str) -> dict:
                 "schema": RESPONSE_SCHEMA,
             },
         },
-        temperature=0,
     )
     content = response.choices[0].message.content
     usage = response.usage
