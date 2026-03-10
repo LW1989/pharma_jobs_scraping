@@ -6,11 +6,14 @@ Applies all schema changes needed for the evaluation module:
   2. Creates the `evaluation_runs` table.
 
 Usage:
-    python migrate_db.py
+    python scripts/migrate_db.py
 """
 
 import logging
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scraper.db import get_cursor, get_connection
 

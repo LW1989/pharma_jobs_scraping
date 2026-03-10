@@ -52,7 +52,6 @@ logging.basicConfig(
 logger = logging.getLogger("run_evaluator")
 
 ROOT = Path(__file__).parent
-CV_PATH = ROOT / "cv.txt"
 REQUIREMENTS_PATH = ROOT / "requirements.yaml"
 
 
@@ -64,17 +63,63 @@ def _md5(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
 
 
-def _load_cv() -> str:
-    if not CV_PATH.exists():
-        logger.error(
-            "cv.txt not found. Copy cv.txt.example to cv.txt and fill in your CV."
-        )
-        sys.exit(1)
-    text = CV_PATH.read_text(encoding="utf-8").strip()
-    if not text:
-        logger.error("cv.txt is empty.")
-        sys.exit(1)
-    return text
+def _auto_synthesize_if_needed(requirements: dict) -> None:
+    """
+    If cv_matching.txt is missing or out of date, automatically run CV synthesis.
+    This ensures run_evaluator.py is self-contained — no manual pre-step needed.
+    """
+    import scripts.synthesize_cv as synthesize_cv
+
+    synthesis_cfg = requirements.get("cv_synthesis", {})
+    source_dir = ROOT / synthesis_cfg.get("source_directory", "input_data/cv")
+    output_file = ROOT / synthesis_cfg.get("output_file", "cv_matching.txt")
+
+    # Only auto-synthesize if there are source CV files available
+    if not source_dir.exists() or not list(source_dir.glob("*.txt")):
+        return  # No source files — skip, _load_cv will handle the fallback
+
+    if synthesize_cv._is_up_to_date(synthesize_cv._combined_hash(
+        synthesize_cv._load_source_cvs(source_dir)
+    )):
+        if output_file.exists():
+            logger.info("CV synthesis:  up to date, skipping regeneration")
+            return
+
+    logger.info("CV synthesis:  cv_matching.txt missing or outdated — running synthesis …")
+    synthesize_cv.main()
+    logger.info("CV synthesis:  complete")
+
+
+def _load_cv(requirements: dict) -> str:
+    """
+    Load CV text from the file specified in requirements.yaml (scoring.cv_file).
+    Auto-triggers synthesis if cv_matching.txt is missing and source files exist.
+    Falls back to cv_matching.txt, then cv.txt if not configured or not found.
+    """
+    _auto_synthesize_if_needed(requirements)
+
+    scoring = requirements.get("scoring", {})
+    configured = scoring.get("cv_file", "")
+
+    candidates = []
+    if configured:
+        candidates.append(ROOT / configured)
+    candidates += [ROOT / "cv_matching.txt", ROOT / "cv.txt"]
+
+    for path in candidates:
+        if path.exists():
+            text = path.read_text(encoding="utf-8").strip()
+            if text and not text.startswith("CV files have been moved"):
+                logger.info("CV file:       %s", path.name)
+                return text
+            if path.name != "cv.txt":
+                logger.warning("CV file '%s' exists but appears empty or is a stub.", path.name)
+
+    logger.error(
+        "No usable CV file found. Add CV .txt files to input_data/cv/ "
+        "or run synthesize_cv.py manually."
+    )
+    sys.exit(1)
 
 
 def _load_requirements() -> dict:
@@ -103,21 +148,26 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Step 1: Load inputs
     # ------------------------------------------------------------------
-    cv_text = _load_cv()
     requirements = _load_requirements()
+    cv_text = _load_cv(requirements)
 
     cv_version = _md5(cv_text)
     requirements_hash = _md5(str(requirements))
 
     filters = requirements.get("filters", {})
+    # Merge job_preferences into filters so the prescreener can access them
+    filters["job_preferences"] = requirements.get("job_preferences", {})
+
     scoring = requirements.get("scoring", {})
-    threshold = int(scoring.get("should_apply_min_score", 70))
+    threshold = int(scoring.get("should_apply_min_score", 65))
+    tier_1_threshold = int(scoring.get("tier_1_min_score", 55))
+    preferences = requirements.get("job_preferences", {})
     model = scoring.get("model") or config.OPENAI_MODEL
 
     logger.info("CV version:    %s", cv_version)
     logger.info("Requirements:  %s", requirements_hash)
     logger.info("Model:         %s", model)
-    logger.info("Apply threshold: score >= %d", threshold)
+    logger.info("Apply threshold: score >= %d (tier-1: >= %d)", threshold, tier_1_threshold)
 
     # ------------------------------------------------------------------
     # Step 2: Fetch jobs to evaluate
@@ -178,7 +228,11 @@ def main() -> None:
                         i, jobs_total, job_id, job.get("title", "")[:60])
             logger.info("         ↳ calling %s …", model)
             try:
-                result = evaluate(job, cv_text, model, threshold)
+                result = evaluate(
+                    job, cv_text, model, threshold,
+                    tier_1_threshold=tier_1_threshold,
+                    preferences=preferences,
+                )
                 save_evaluation(
                     job_id=job_id,
                     cv_version=cv_version,

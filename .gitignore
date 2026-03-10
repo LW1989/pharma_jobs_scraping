@@ -4,6 +4,11 @@
 
 # CV — personal data, never commit
 cv.txt
+input_data/cv/*.txt
+
+# Generated CV synthesis output — personal data, never commit
+cv_matching.txt
+.cv_synthesis_hash
 
 # Notebooks — local exploration only
 *.ipynb

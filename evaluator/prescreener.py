@@ -67,4 +67,19 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
                     f"Pre-screened out: title contains excluded keyword '{kw}'"
                 )
 
+    # --- Tier-3 preference exclusions ---
+    # Reads tier_3_exclude from the job_preferences section of requirements.yaml.
+    # Each entry has a name (for logging) and a list of title_keywords to match.
+    # This runs BEFORE any LLM call — zero tokens spent on unwanted role types.
+    tier_3_entries = (filters.get("job_preferences") or {}).get("tier_3_exclude", [])
+    if tier_3_entries:
+        title = (job.get("title") or "").lower()
+        for entry in tier_3_entries:
+            for kw in entry.get("title_keywords", []):
+                if kw.lower() in title:
+                    return False, (
+                        f"Pre-screened out: tier-3 role '{entry['name']}' "
+                        f"(keyword: '{kw}')"
+                    )
+
     return True, "Passed pre-screening"
