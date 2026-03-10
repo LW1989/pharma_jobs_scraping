@@ -50,5 +50,14 @@ scoring:
 
   # OpenAI model to use for scoring.
   # This overrides the OPENAI_MODEL environment variable.
-  # Options: "gpt-4o-mini" (cheap, fast), "gpt-4o" (best quality)
-  model: gpt-4o-mini
+  #
+  # Current options (March 2026, cheapest to most capable):
+  #   gpt-5-nano    — $0.05/$0.40 per 1M tokens — ultra-cheap, GPT-5 base
+  #   gpt-4.1-nano  — $0.10/$0.40 per 1M tokens — cheap, older architecture
+  #   gpt-5-mini    — $0.25/$2.00 per 1M tokens — RECOMMENDED (GPT-5 quality, low cost)
+  #   gpt-4.1-mini  — $0.40/$1.60 per 1M tokens — good mid-tier
+  #   gpt-4.1       — $2.00/$8.00 per 1M tokens — overkill for this task
+  #
+  # Estimated cost for a full run of ~700 jobs:
+  #   gpt-5-nano: ~$0.12   |   gpt-5-mini: ~$0.59   |   gpt-4.1-mini: ~$0.73
+  model: gpt-5-mini
