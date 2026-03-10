@@ -20,10 +20,11 @@ filters:
 
   # Location keywords — at least ONE must appear in the `location` column (case-insensitive).
   # Leave empty to allow any location (including on-site only).
+  #
+  # NOTE: pharmiweb.jobs uses "Homeworking" exclusively as the remote tag.
+  # "Remote" and "Hybrid" never appear in location values on this site (verified March 2026).
+  # "Home" is sufficient as it matches "Homeworking" and any bare "Home" entries.
   location_keywords:
-    - Homeworking
-    - Remote
-    - Hybrid
     - Home
 
   # Accepted experience levels — matched against the `experience_level` DB column.
@@ -32,17 +33,23 @@ filters:
   experience_levels:
     - Experienced (non-manager)
     - Management
-    - Senior Management
+    - Graduate
+    - Entry level
+
 
   # Title keyword exclusions — if ANY of these appear in the job title (case-insensitive),
   # the job is immediately rejected without an LLM call.
   exclude_title_keywords:
-    - Intern
-    - Internship
-    - Apprentice
+    - Senior Director
+    - Executive Director
+    - Medical Director
+    - Head of
+    - Chief
     - Vice President
-    - Chief Executive
-    - Chief Financial
+    - VP
+    - Graduate
+    - Junior
+    - Trainee
 
 scoring:
   # Minimum score (0–100) for should_apply to be set to true.

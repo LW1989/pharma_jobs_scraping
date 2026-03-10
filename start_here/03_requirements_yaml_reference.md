@@ -44,16 +44,19 @@ Essentially everything is Full Time — this filter rarely matters but is harmle
 
 ## location_keywords
 
-406 of 966 jobs (42%) are remote/hybrid/home. The rest are on-site only.
+406 of 966 jobs (42%) are remote/homeworking. The rest are on-site only.
 
-The keywords that cover the remote/hybrid jobs:
+**Important:** pharmiweb.jobs uses `Homeworking` exclusively as the remote location tag.
+`Remote` and `Hybrid` have **zero matches** in the DB — do not include them.
 
-| Keyword | Notes |
-|---|---|
-| `Homeworking` | The most common remote tag on this site |
-| `Remote` | Used occasionally |
-| `Hybrid` | Used occasionally |
-| `Home` | Catches "Homeworking" and bare "Home" entries |
+| Keyword | Matches | Notes |
+|---|---|---|
+| `Home` | 406 | Catches all "Homeworking" entries (substring match) — use this |
+| `Homeworking` | 406 | Redundant if `Home` is present |
+| `Remote` | 0 | Never used on this site |
+| `Hybrid` | 0 | Never used on this site |
+
+**Why the scraper collects on-site jobs at all:** the search URL combines `LocationId=3` (Europe, all jobs) with `LocationId=20752010` (Homeworking) using OR logic. So all 966 European jobs are scraped regardless of remote status. The location filter here is what removes the 560 on-site-only jobs.
 
 **Leave this list empty (`[]`) if you're open to relocating / on-site roles** — that gives you 966 jobs instead of 406.
 
