@@ -29,6 +29,14 @@ MIGRATIONS = [
         """,
     ),
     (
+        "Add job_sent and job_sent_at columns to jobs",
+        """
+        ALTER TABLE jobs
+          ADD COLUMN IF NOT EXISTS job_sent    BOOLEAN   DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS job_sent_at TIMESTAMP DEFAULT NULL
+        """,
+    ),
+    (
         "Create evaluation_runs table",
         """
         CREATE TABLE IF NOT EXISTS evaluation_runs (

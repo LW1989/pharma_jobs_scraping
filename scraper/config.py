@@ -13,6 +13,17 @@ DB_PASSWORD = os.environ["DB_PASSWORD"]
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
 
+# Email — required only when running run_reporter.py
+SMTP_HOST     = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
+SMTP_USER     = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+REPORT_TO     = os.environ.get("REPORT_TO", "")   # comma-separated recipients
+
+# Telegram — required only when running run_reporter.py
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+
 # Pricing per 1M tokens (input / output) used for cost estimation in evaluation_runs.
 # Source: https://openai.com/api/pricing/ — verified March 2026
 OPENAI_PRICING: dict[str, dict[str, float]] = {

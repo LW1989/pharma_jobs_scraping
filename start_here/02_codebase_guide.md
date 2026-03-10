@@ -5,10 +5,9 @@
 ```
 pharma_jobs_scraping/
 │
-├── run_scraper.py          ← Daily scraping entry point (cron or manual)
-├── run_evaluator.py        ← CV evaluation entry point (run after scraping)
-├── setup_db.py             ← One-time schema creation; safe to re-run
-├── migrate_db.py           ← Additive schema migrations; safe to re-run
+├── run_scraper.py          ← Daily: scrape pharmiweb.jobs into DB
+├── run_evaluator.py        ← Daily: score jobs against CV (run after scraper)
+├── run_reporter.py         ← Daily: send email + Telegram digest (run after evaluator)
 │
 ├── scraper/
 │   ├── config.py           ← All settings loaded from .env
@@ -20,10 +19,25 @@ pharma_jobs_scraping/
 │   ├── llm_client.py       ← OpenAI API wrapper + prompt builder
 │   └── db.py               ← Evaluator DB operations (eval column writes)
 │
-├── requirements.yaml       ← User-editable job filters and scoring config
-├── cv.txt                  ← Your CV in plain text (GIT-IGNORED — never commit)
-├── cv.txt.example          ← Template showing expected CV format
+├── reporter/
+│   ├── db.py               ← Fetch unsent jobs; mark_as_sent()
+│   ├── formatter.py        ← Build HTML email body + Telegram text
+│   ├── email_sender.py     ← smtplib wrapper (Gmail SMTP, TLS port 587)
+│   └── telegram_sender.py  ← requests wrapper for Telegram Bot API
 │
+├── scripts/                ← One-off / maintenance scripts
+│   ├── setup_db.py         ← One-time schema creation
+│   ├── migrate_db.py       ← Additive schema migrations; safe to re-run
+│   ├── synthesize_cv.py    ← Combine input_data/cv/*.txt → cv_matching.txt
+│   ├── test_eval.py        ← Smoke test for the evaluation module
+│   └── test_reporter.py    ← Smoke test for the reporter module
+│
+├── notebooks/
+│   └── explore_db.ipynb
+│
+├── input_data/cv/          ← Drop raw CV .txt files here (git-ignored)
+│
+├── requirements.yaml       ← User-editable filters, scoring, and reporting config
 ├── .env                    ← Git-ignored; your actual credentials
 ├── .env.example            ← Template for Hetzner production
 ├── .env.local.example      ← Template for local Docker dev (port 5433)
@@ -45,8 +59,12 @@ Loads `.env` via `python-dotenv` at import time. Exposes:
 | `REQUEST_TIMEOUT_SECONDS` | HTTP timeout (30s) |
 | `HEADERS` | Browser-like User-Agent header |
 | `OPENAI_API_KEY` | OpenAI API key (required for run_evaluator.py) |
-| `OPENAI_MODEL` | Default model (gpt-4o-mini); overridden by requirements.yaml |
+| `OPENAI_MODEL` | Default model (gpt-5-mini); overridden by requirements.yaml |
 | `OPENAI_PRICING` | Dict of input/output costs per model for cost estimation |
+| `SMTP_HOST/PORT/USER/PASSWORD` | Gmail SMTP credentials (required for run_reporter.py) |
+| `REPORT_TO` | Comma-separated recipient email addresses |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Target chat/group ID for the Telegram digest |
 
 ---
 
@@ -177,7 +195,8 @@ Uses `response_format` with `strict=True` (OpenAI Structured Outputs) to guarant
 ## run_evaluator.py
 
 ```
-Step 1  Load cv.txt → cv_version = MD5(cv_text)
+Step 1  Auto-synthesize cv_matching.txt if missing/outdated
+        Load cv_matching.txt → cv_version = MD5(cv_text)
         Load requirements.yaml → requirements_hash = MD5(str(requirements))
 
 Step 2  get_jobs_to_evaluate(cv_version) → jobs list
@@ -192,7 +211,49 @@ Step 4  insert_evaluation_run(tokens, cost, counts, model, cv_version)
 Step 5  Log summary
 ```
 
-**To re-score all jobs** after updating cv.txt: just run `python run_evaluator.py` — the MD5 hash will differ and all jobs will be re-queued automatically.
+**To re-score all jobs** after updating CV files: drop new `.txt` files in `input_data/cv/` and run `python run_evaluator.py` — synthesis and re-evaluation happen automatically.
+
+---
+
+## reporter/db.py
+
+| Function | What it does |
+|---|---|
+| `fetch_unsent_jobs(limit, min_score)` | Returns top-N evaluated jobs where `job_sent=FALSE`, ordered by score DESC |
+| `mark_as_sent(job_ids)` | Sets `job_sent=TRUE` and `job_sent_at=NOW()` for given IDs |
+| `count_evaluated_today()` | Returns totals for report header (total evaluated, apply count, review count) |
+
+---
+
+## reporter/formatter.py
+
+Two public functions:
+
+### `build_email_html(jobs, stats) -> str`
+Returns a complete `<!DOCTYPE html>` email with one card per job. Each card shows the score badge with dot-meter (●●●●●○○○○○), score colour (green/amber/grey), title, employer, location, contract details, closing date, AI reasoning, and a "View Job →" link button.
+
+### `build_telegram_text(jobs, top_n) -> str`
+Returns an HTML-formatted string (Telegram `parse_mode=HTML`) with numbered emoji entries for the top-N jobs. Stays well within Telegram's 4 096-character limit for a top-5 digest.
+
+---
+
+## run_reporter.py
+
+```
+Step 1  fetch_unsent_jobs(limit=top_email, min_score=0) → jobs
+
+        If no jobs → log and exit cleanly
+
+Step 2  build_email_html(jobs) → send via Gmail SMTP (TLS port 587)
+          On SMTP failure → log error + exit 1 (jobs NOT marked sent)
+
+Step 3  build_telegram_text(jobs, top_n=top_telegram) → POST to Bot API
+          On Telegram failure → log warning only (email already delivered)
+
+Step 4  mark_as_sent(job_ids)
+```
+
+Jobs are only marked sent after the email delivers successfully, so a network failure on any given day will retry the same jobs the next day.
 
 ---
 
@@ -209,11 +270,15 @@ first_seen, last_seen, job_active
 passed_prescreening  BOOLEAN    -- NULL=pending, TRUE=passed, FALSE=filtered
 evaluated            BOOLEAN    DEFAULT false
 evaluated_at         TIMESTAMP
-cv_version           VARCHAR(64)  -- MD5 of cv.txt
+cv_version           VARCHAR(64)  -- MD5 of cv_matching.txt
 score                FLOAT        -- 0–100
 score_reasoning      TEXT
 should_apply         BOOLEAN    DEFAULT false
 applied              BOOLEAN    DEFAULT false  -- set manually
+
+-- Reporter-managed (run_reporter.py)
+job_sent             BOOLEAN    DEFAULT false
+job_sent_at          TIMESTAMP
 
 -- evaluation_runs table (one row per run_evaluator.py execution)
 run_id, run_at, model, cv_version, requirements_hash,

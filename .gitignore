@@ -34,3 +34,6 @@ logs/
 .DS_Store
 .idea/
 .vscode/
+
+# Reporter smoke test output — local HTML preview only
+_test_email.html

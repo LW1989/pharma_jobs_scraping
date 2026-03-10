@@ -181,3 +181,21 @@ cv_synthesis:
   # gpt-5 recommended: better instruction-following than gpt-5-mini, much
   # cheaper than gpt-5.4, estimated cost per synthesis < $0.03.
   model: gpt-5
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+# Controls what run_reporter.py sends after each evaluation run.
+# run_reporter.py must be run AFTER run_evaluator.py.
+
+reporting:
+  # Number of jobs to include in the email report.
+  top_jobs_email: 10
+
+  # Number of jobs to include in the Telegram digest.
+  top_jobs_telegram: 5
+
+  # Minimum score a job must have to be included in the report.
+  # 0 = always include the top-N regardless of score (recommended).
+  # Set to e.g. 50 to suppress very weak matches on quiet days.
+  min_score_to_report: 0
