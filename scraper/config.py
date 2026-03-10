@@ -9,6 +9,40 @@ DB_NAME = os.environ["DB_NAME"]
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]
 
+# OpenAI — required only when running run_evaluator.py
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+
+# Email — required only when running run_reporter.py
+SMTP_HOST     = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
+SMTP_USER     = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+REPORT_TO     = os.environ.get("REPORT_TO", "")   # comma-separated recipients
+
+# Telegram — required only when running run_reporter.py
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# Pricing per 1M tokens (input / output) used for cost estimation in evaluation_runs.
+# Source: https://openai.com/api/pricing/ — verified March 2026
+OPENAI_PRICING: dict[str, dict[str, float]] = {
+    # GPT-5 family (current generation, recommended)
+    "gpt-5-nano":            {"input": 0.05,  "output": 0.40},   # cheapest
+    "gpt-5-mini":            {"input": 0.25,  "output": 2.00},   # recommended default
+    "gpt-5":                 {"input": 1.25,  "output": 10.00},
+    # GPT-4.1 family
+    "gpt-4.1-nano":          {"input": 0.10,  "output": 0.40},
+    "gpt-4.1-mini":          {"input": 0.40,  "output": 1.60},
+    "gpt-4.1":               {"input": 2.00,  "output": 8.00},
+    # Reasoning models
+    "o4-mini":               {"input": 1.10,  "output": 4.40},
+    "o3":                    {"input": 2.00,  "output": 8.00},
+    # Legacy (still work, but superseded)
+    "gpt-4o-mini":           {"input": 0.15,  "output": 0.60},
+    "gpt-4o":                {"input": 2.50,  "output": 10.00},
+}
+
 SEARCH_BASE_URL = (
     "https://www.pharmiweb.jobs/searchjobs/"
     "?Keywords=&LocationId=3&RadialLocation=100&LocationId=20752010&CountryCode="

@@ -2,6 +2,18 @@
 .env
 .env.local
 
+# CV — personal data, never commit
+cv.txt
+input_data/cv/*.txt
+
+# Generated CV synthesis output — personal data, never commit
+cv_matching.txt
+.cv_synthesis_hash
+
+# Notebooks — local exploration only
+*.ipynb
+.ipynb_checkpoints/
+
 # Python
 __pycache__/
 *.pyc
@@ -22,3 +34,6 @@ logs/
 .DS_Store
 .idea/
 .vscode/
+
+# Reporter smoke test output — local HTML preview only
+_test_email.html

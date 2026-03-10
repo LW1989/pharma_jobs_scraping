@@ -1,0 +1,201 @@
+# Job filtering requirements for the CV evaluation module.
+# Edit this file to match your personal preferences before running run_evaluator.py.
+#
+# Pre-screening filters are applied WITHOUT any LLM calls.
+# Only jobs that pass ALL filters are sent to the LLM for scoring.
+#
+# Use empty lists ([]) to disable a filter entirely (allow all values).
+
+filters:
+
+  # Accepted contract types — matched against the `contract_type` DB column.
+  # Common values seen on pharmiweb.jobs: "Permanent", "Contract"
+  contract_types:
+    - Permanent
+
+  # Accepted working hours — matched against the `hours` DB column.
+  # Common values: "Full Time", "Part Time"
+  hours:
+    - Full Time
+
+  # Location keywords — at least ONE must appear in the `location` column (case-insensitive).
+  # Leave empty to allow any location (including on-site only).
+  #
+  # NOTE: pharmiweb.jobs uses "Homeworking" exclusively as the remote tag.
+  # "Remote" and "Hybrid" never appear in location values on this site (verified March 2026).
+  # "Home" is sufficient as it matches "Homeworking" and any bare "Home" entries.
+  location_keywords:
+    - Home
+
+  # Accepted experience levels — matched against the `experience_level` DB column.
+  # Common values: "Entry level", "Graduate", "Experienced (non-manager)",
+  #                "Management", "Senior Management", "Director/Executive"
+  experience_levels:
+    - Experienced (non-manager)
+    - Management
+    - Graduate
+    - Entry level
+
+  # Title keyword exclusions — if ANY of these appear in the job title (case-insensitive),
+  # the job is immediately rejected without an LLM call.
+  exclude_title_keywords:
+    - Senior Director
+    - Executive Director
+    - Medical Director
+    - Head of
+    - Chief
+    - Vice President
+    - VP
+    - Graduate
+    - Junior
+    - Trainee
+
+
+# ---------------------------------------------------------------------------
+# Job preference tiers
+# ---------------------------------------------------------------------------
+# Tier 1: "Yes, definitely" — lower apply threshold (tier_1_min_score)
+# Tier 2: "Would work in this job" — standard threshold (should_apply_min_score)
+# Tier 3: "Would not work in this job" — pre-screener rejects on title_keywords
+#          (no LLM call, zero tokens spent)
+#
+# The LLM is given the Tier 1 and Tier 2 lists to classify each job and apply
+# the correct threshold. Tier 3 is handled entirely by the pre-screener.
+
+job_preferences:
+
+  # Tier 1 — "Yes, definitely"
+  # Roles the candidate actively wants to do.
+  # Lower apply threshold: should_apply = true if score >= tier_1_min_score
+  tier_1_definitely:
+    - R&D Project Manager / Scientific Program Manager
+    - Clinical Trial Manager / Clinical Study Manager (including Associate CTM)
+
+  # Tier 2 — "Would work in this job"
+  # Acceptable roles, not the first choice.
+  # Standard apply threshold: should_apply = true if score >= should_apply_min_score
+  tier_2_would_work:
+    - Clinical Research Associate (CRA)
+    - Drug Safety / Pharmacovigilance
+    - Medical Writing / Scientific Communications
+    - Translational Research / Clinical Development Scientist
+    - Research Operations / Lab Operations Manager
+    - Alliance Management / Technology Transfer
+
+  # Tier 3 — "Would not work in this job"
+  # Hard exclusions. Pre-screener rejects these on title keywords (no LLM call).
+  # Each entry has a descriptive name and a list of title keywords (case-insensitive).
+  tier_3_exclude:
+    - name: Quality Assurance / Quality Operations
+      title_keywords:
+        - Quality Assurance
+        - QA Specialist
+        - QA Manager
+        - Quality Operations
+        - Quality Systems
+        - GCP Quality
+        - GMP Quality
+        - Quality Compliance
+    - name: Regulatory Affairs
+      title_keywords:
+        - Regulatory Affairs
+        - Regulatory CMC
+        - Regulatory Submissions
+        - Regulatory Operations
+        - Regulatory Strategy
+    - name: Medical Science Liaison
+      title_keywords:
+        - Medical Science Liaison
+        - MSL
+        - Field Medical
+        - Scientific Liaison
+        - Medical Liaison
+    - name: Commercial / Field Sales
+      title_keywords:
+        - Sales Representative
+        - Sales Rep
+        - Sales Manager
+        - Territory Manager
+        - Field Force
+        - Key Account Manager
+        - Account Executive
+    - name: Manufacturing / Production
+      title_keywords:
+        - Production Operator
+        - Manufacturing Technician
+        - Process Operator
+        - Shift Manager
+    - name: Biostatistics / Statistical Programming
+      title_keywords:
+        - Biostatistician
+        - Statistical Programmer
+        - SAS Programmer
+        - Data Programmer
+
+
+# ---------------------------------------------------------------------------
+# Scoring configuration
+# ---------------------------------------------------------------------------
+
+scoring:
+  # Which CV file to use for job matching.
+  # Run synthesize_cv.py first to generate cv_matching.txt from input_data/cv/*.txt
+  # Falls back to cv.txt if not found.
+  cv_file: cv_matching.txt
+
+  # Minimum score (0–100) for should_apply = true.
+  # Used for Tier 2 roles and as fallback for unclassified jobs.
+  should_apply_min_score: 65
+
+  # Lower threshold for Tier 1 "definitely want" roles.
+  # The candidate is more willing to apply even with a moderate fit score.
+  tier_1_min_score: 55
+
+  # OpenAI model to use for per-job scoring.
+  # This overrides the OPENAI_MODEL environment variable.
+  #
+  # Current options (March 2026, cheapest to most capable):
+  #   gpt-5-nano    — $0.05/$0.40 per 1M tokens — ultra-cheap, GPT-5 base
+  #   gpt-5-mini    — $0.25/$2.00 per 1M tokens — RECOMMENDED (GPT-5 quality, low cost)
+  #   gpt-5         — $1.25/$10.00 per 1M tokens — higher quality, higher cost
+  #
+  # Estimated cost for a full run of ~300 LLM-evaluated jobs:
+  #   gpt-5-nano: ~$0.04   |   gpt-5-mini: ~$0.20   |   gpt-5: ~$1.00
+  model: gpt-5-mini
+
+
+# ---------------------------------------------------------------------------
+# CV synthesis configuration
+# ---------------------------------------------------------------------------
+# Used by synthesize_cv.py (run once when CVs change, not during daily eval).
+
+cv_synthesis:
+  # Directory containing source CV files (all *.txt files are combined).
+  # Drop new CV versions here as plain .txt files — no config change needed.
+  source_directory: input_data/cv
+
+  # Output file path (relative to project root). Git-ignored.
+  output_file: cv_matching.txt
+
+  # Model for synthesis — use a more capable model since this runs only once.
+  # gpt-5 recommended: better instruction-following than gpt-5-mini, much
+  # cheaper than gpt-5.4, estimated cost per synthesis < $0.03.
+  model: gpt-5
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+# Controls what run_reporter.py sends after each evaluation run.
+# run_reporter.py must be run AFTER run_evaluator.py.
+
+reporting:
+  # Number of jobs to include in the email report.
+  top_jobs_email: 10
+
+  # Number of jobs to include in the Telegram digest.
+  top_jobs_telegram: 5
+
+  # Minimum score a job must have to be included in the report.
+  # 0 = always include the top-N regardless of score (recommended).
+  # Set to e.g. 50 to suppress very weak matches on quiet days.
+  min_score_to_report: 0
