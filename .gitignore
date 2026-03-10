@@ -5,6 +5,10 @@
 # CV — personal data, never commit
 cv.txt
 
+# Notebooks — local exploration only
+*.ipynb
+.ipynb_checkpoints/
+
 # Python
 __pycache__/
 *.pyc
