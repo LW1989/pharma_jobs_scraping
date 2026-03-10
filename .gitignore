@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# Deployment guide — contains server credentials, never commit
+DEPLOYMENT.md
+
 # DB dumps — personal data, never commit
 *.sql
 
