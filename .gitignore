@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# DB dumps — personal data, never commit
+*.sql
+
 # CV — personal data, never commit
 cv.txt
 input_data/cv/*.txt
