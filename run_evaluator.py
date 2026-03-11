@@ -163,11 +163,13 @@ def main() -> None:
     tier_1_threshold = int(scoring.get("tier_1_min_score", 55))
     preferences = requirements.get("job_preferences", {})
     model = scoring.get("model") or config.OPENAI_MODEL
+    max_job_details_chars = int(scoring.get("max_job_details_chars") or 0)
 
     logger.info("CV version:    %s", cv_version)
     logger.info("Requirements:  %s", requirements_hash)
     logger.info("Model:         %s", model)
     logger.info("Apply threshold: score >= %d (tier-1: >= %d)", threshold, tier_1_threshold)
+    logger.info("Job details:    max %s chars to LLM", max_job_details_chars or "all")
 
     # ------------------------------------------------------------------
     # Step 2: Fetch jobs to evaluate
@@ -232,6 +234,7 @@ def main() -> None:
                     job, cv_text, model, threshold,
                     tier_1_threshold=tier_1_threshold,
                     preferences=preferences,
+                    max_job_details_chars=max_job_details_chars,
                 )
                 save_evaluation(
                     job_id=job_id,

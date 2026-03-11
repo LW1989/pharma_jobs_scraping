@@ -253,8 +253,10 @@ def _build_user_prompt(
     threshold: int,
     tier_1_threshold: int | None = None,
     preferences: dict | None = None,
+    max_job_details_chars: int = 0,
 ) -> str:
-    job_details = (job.get("job_details") or "")[:2000]
+    raw_details = job.get("job_details") or ""
+    job_details = raw_details if max_job_details_chars <= 0 else raw_details[:max_job_details_chars]
 
     # Build the preference tier block (empty string if no preferences)
     tier_2_threshold = threshold
@@ -367,6 +369,7 @@ def evaluate(
     threshold: int,
     tier_1_threshold: int | None = None,
     preferences: dict | None = None,
+    max_job_details_chars: int = 0,
 ) -> EvalResult:
     """
     Evaluate a single job against the CV using the LLM.
@@ -380,12 +383,13 @@ def evaluate(
                            Defaults to threshold if not provided.
         preferences:       job_preferences dict from requirements.yaml, used to
                            inject tier lists into the prompt.
+        max_job_details_chars: Truncate job_details to this many chars (0 = no limit).
 
     Returns:
         EvalResult dataclass with score, reasoning, flag, and token counts.
     """
     user_prompt = _build_user_prompt(
-        job, cv_text, threshold, tier_1_threshold, preferences
+        job, cv_text, threshold, tier_1_threshold, preferences, max_job_details_chars
     )
 
     logger.debug("Calling %s for job %s …", model, job.get("job_id"))

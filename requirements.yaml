@@ -163,6 +163,10 @@ scoring:
   #   gpt-5-nano: ~$0.04   |   gpt-5-mini: ~$0.20   |   gpt-5: ~$1.00
   model: gpt-5-mini
 
+  # Max characters of job description sent to the LLM (saves tokens; 0 = no limit).
+  # Default 8000 covers most full postings; increase or set 0 if scoring misses important details.
+  max_job_details_chars: 0
+
 
 # ---------------------------------------------------------------------------
 # CV synthesis configuration
