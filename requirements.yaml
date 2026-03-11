@@ -18,14 +18,126 @@ filters:
   hours:
     - Full Time
 
-  # Location keywords — at least ONE must appear in the `location` column (case-insensitive).
-  # Leave empty to allow any location (including on-site only).
+  # Location filter — two-path logic (no LLM, no network):
   #
-  # NOTE: pharmiweb.jobs uses "Homeworking" exclusively as the remote tag.
-  # "Remote" and "Hybrid" never appear in location values on this site (verified March 2026).
-  # "Home" is sufficient as it matches "Homeworking" and any bare "Home" entries.
-  location_keywords:
-    - Home
+  #   Remote jobs (contain a remote_keyword):
+  #     PASS if location also contains an allowed_country.
+  #     Exception: bare "Homeworking" with no country always passes (lenient).
+  #
+  #   On-site / Hybrid jobs (no remote_keyword):
+  #     PASS if location contains an allowed_city.
+  #
+  # Set all three sub-lists to [] to disable location filtering entirely.
+  location:
+
+    # Remote work indicators — presence of any of these triggers the country check.
+    remote_keywords:
+      - Home
+      - Homeworking
+      - Home Office
+      - Remote
+
+    # Countries accepted for remote work.
+    # Job passes if the location string contains any of these (case-insensitive substring).
+    allowed_countries:
+      # EU 27
+      - Austria
+      - Belgium
+      - Bulgaria
+      - Croatia
+      - Cyprus
+      - Czech Republic
+      - Denmark
+      - Estonia
+      - Finland
+      - France
+      - Germany
+      - Greece
+      - Hungary
+      - Ireland
+      - Italy
+      - Latvia
+      - Lithuania
+      - Luxembourg
+      - Malta
+      - Netherlands
+      - Poland
+      - Portugal
+      - Romania
+      - Slovakia
+      - Slovenia
+      - Spain
+      - Sweden
+      # Non-EU Europe + Brazil
+      - Switzerland
+      - Norway
+      - UK
+      - United Kingdom
+      - Great Britain      # catches "Regional Great Britain..., Homeworking"
+      - Northern Ireland
+      - Brazil
+
+    # Cities/regions accepted for on-site or hybrid work.
+    # Job passes if the location string contains any of these (case-insensitive substring).
+    allowed_cities:
+      # Core: Düsseldorf + immediate neighbours
+      - Düsseldorf
+      - Köln
+      - Cologne
+      - Neuss
+      - Hilden
+      - Monheim
+      - Leverkusen
+      - Duisburg
+      - Essen
+      - Oberhausen
+      - Mülheim
+      - Mülheim an der Ruhr
+      - Bochum
+      - Dortmund
+      - Bonn
+      - Bergisch Gladbach
+      # Düsseldorf/Cologne commute radius (~26 km, Pendleratlas)
+      - Ratingen
+      - Meerbusch
+      - Krefeld
+      - Mettmann
+      - Erkrath
+      - Haan
+      - Langenfeld
+      - Langenfeld (Rheinland)
+      - Solingen
+      - Wuppertal
+      - Willich
+      # Cologne area
+      - Frechen
+      - Hürth
+      - Pulheim
+      - Brühl
+      - Troisdorf
+      # Bonn area
+      - Sankt Augustin
+      - Siegburg
+      - Königswinter
+      - Bornheim
+      # Ruhr
+      - Gelsenkirchen
+      - Herne
+      - Hagen
+      - Hamm
+      - Recklinghausen
+      - Bottrop
+      # Other NRW pharma/university hubs
+      - Münster
+      - Bielefeld
+      - Aachen
+      - Mönchengladbach
+      # Region names as they appear in ads
+      - NRW
+      - Nordrhein-Westfalen
+      - Rheinland
+      - Ruhrgebiet
+      - Rhine-Ruhr
 
   # Accepted experience levels — matched against the `experience_level` DB column.
   # Common values: "Entry level", "Graduate", "Experienced (non-manager)",

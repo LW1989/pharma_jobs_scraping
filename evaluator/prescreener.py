@@ -37,15 +37,32 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
                 f"Pre-screened out: hours '{value}' not in {allowed_hours}"
             )
 
-    # --- Location keywords (OR logic — any match passes) ---
-    location_keywords = filters.get("location_keywords", [])
-    if location_keywords:
-        location = (job.get("location") or "").lower()
-        if not any(kw.lower() in location for kw in location_keywords):
-            return False, (
-                f"Pre-screened out: location '{job.get('location')}' "
-                f"does not contain any of {location_keywords}"
-            )
+    # --- Location (two-path: remote needs country, on-site/hybrid needs city) ---
+    location_cfg = filters.get("location", {})
+    if location_cfg:
+        remote_kws = location_cfg.get("remote_keywords", [])
+        countries  = location_cfg.get("allowed_countries", [])
+        cities     = location_cfg.get("allowed_cities", [])
+        loc        = (job.get("location") or "").lower()
+        is_remote  = any(kw.lower() in loc for kw in remote_kws)
+        if is_remote:
+            # Strip remote keywords from the location; if nothing meaningful
+            # remains (bare "Homeworking"), pass without a country check.
+            loc_remainder = loc
+            for kw in remote_kws:
+                loc_remainder = loc_remainder.replace(kw.lower(), "")
+            loc_remainder = loc_remainder.strip(" ,;/")
+            if loc_remainder and not any(c.lower() in loc for c in countries):
+                return False, (
+                    f"Pre-screened out: remote job in non-allowed country "
+                    f"(location: '{job.get('location')}')"
+                )
+        else:
+            if not any(c.lower() in loc for c in cities):
+                return False, (
+                    f"Pre-screened out: on-site/hybrid job not in allowed city "
+                    f"(location: '{job.get('location')}')"
+                )
 
     # --- Experience level ---
     allowed_experience = filters.get("experience_levels", [])

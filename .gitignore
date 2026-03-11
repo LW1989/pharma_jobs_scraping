@@ -43,3 +43,7 @@ logs/
 
 # Reporter smoke test output — local HTML preview only
 _test_email.html
+
+# Archived / superseded docs — not part of the active codebase
+start_here/_archive/
+not used md files/
