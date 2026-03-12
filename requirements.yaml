@@ -43,29 +43,18 @@ filters:
       # EU 27
       - Austria
       - Belgium
-      - Bulgaria
-      - Croatia
       - Cyprus
-      - Czech Republic
       - Denmark
-      - Estonia
       - Finland
       - France
       - Germany
-      - Greece
-      - Hungary
       - Ireland
       - Italy
-      - Latvia
-      - Lithuania
       - Luxembourg
       - Malta
       - Netherlands
       - Poland
       - Portugal
-      - Romania
-      - Slovakia
-      - Slovenia
       - Spain
       - Sweden
       # Non-EU Europe + Brazil
@@ -75,7 +64,6 @@ filters:
       - United Kingdom
       - Great Britain      # catches "Regional Great Britain..., Homeworking"
       - Northern Ireland
-      - Brazil
 
     # Cities/regions accepted for on-site or hybrid work.
     # Job passes if the location string contains any of these (case-insensitive substring).
