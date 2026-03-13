@@ -1,0 +1,300 @@
+# Company watchlist — NRW pharma/biotech companies with their own career pages.
+#
+# Populated from: https://docs.google.com/spreadsheets/d/1Ty6fRQIxwxY9cV-s7Cuv9-L59BW2Pzdsx7Mxpt82m54
+# Keep up to date by running: python scripts/sync_companies_from_sheet.py
+#
+# source_type values:
+#   personio   — uses Personio JSON API (no auth required)
+#   workable   — uses Workable JSON API (no auth required)
+#   recruitee  — uses Recruitee JSON API (no auth required)
+#   html       — generic page fetch + LLM extraction
+#   skip       — JS-only or inaccessible page; excluded from scraping
+
+companies:
+
+  # ── ATS platforms ──────────────────────────────────────────────────────────
+
+  - name: Alvotech
+    city: Jülich
+    country: Germany
+    career_url: https://alvotech.wd103.myworkdayjobs.com/Alvotech_Careers
+    source_type: html   # Workday has no public JSON API
+
+  - name: Allucent
+    city: Köln
+    country: Germany
+    career_url: https://apply.workable.com/allucent/
+    source_type: workable
+    slug: allucent
+
+  - name: Prosion
+    city: Köln
+    country: Germany
+    career_url: https://prosion-gmbh.jobs.personio.de
+    source_type: personio
+    slug: prosion-gmbh
+
+  - name: Cellex
+    city: Cologne
+    country: Germany
+    career_url: https://cellexgmbh.recruitee.com
+    source_type: recruitee
+    slug: cellexgmbh
+
+  # ── Large companies with custom ATS ────────────────────────────────────────
+
+  - name: Evotec
+    city: Köln
+    country: Germany
+    career_url: https://careers.evotec.com/en
+    source_type: html
+
+  - name: Labcorp
+    city: Münster
+    country: Germany
+    career_url: https://de-careers.labcorp.com/global/en
+    source_type: html
+
+  - name: Saltigo (LANXESS)
+    city: Leverkusen
+    country: Germany
+    career_url: https://career.lanxess.com
+    source_type: html
+
+  # ── Düsseldorf area ────────────────────────────────────────────────────────
+
+  - name: DNTOX
+    city: Düsseldorf
+    country: Germany
+    career_url: https://dntox.de/career/
+    source_type: html
+
+  - name: Autodisplay Biotech
+    city: Düsseldorf
+    country: Germany
+    career_url: http://www.autodisplay-biotech.com/html/job_opportunities.html
+    source_type: html
+
+  - name: Priavoid
+    city: Düsseldorf
+    country: Germany
+    career_url: https://priavoid.com/careers/
+    source_type: html
+
+  - name: Trans Immune
+    city: Düsseldorf
+    country: Germany
+    career_url: https://transimmune.com/career-opportunities/
+    source_type: html
+
+  - name: Enzymaster
+    city: Düsseldorf
+    country: Germany
+    career_url: https://enzymaster.de/contactcareers/
+    source_type: html
+
+  - name: CUREosity
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.cureosity.com/about/career
+    source_type: html
+
+  - name: Arensia
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.arensia-em.com
+    source_type: html
+
+  # ── Cologne / Köln area ────────────────────────────────────────────────────
+
+  - name: BioEcho
+    city: Köln
+    country: Germany
+    career_url: https://www.bioecho.com/
+    source_type: html
+
+  - name: PAIA biotech
+    city: Köln
+    country: Germany
+    career_url: https://www.paiabio.com
+    source_type: html
+
+  - name: Disco Pharma
+    city: Köln
+    country: Germany
+    career_url: https://discopharma.de/#about
+    source_type: html
+
+  - name: Hözel Diagnostika
+    city: Köln
+    country: Germany
+    career_url: https://www.hoelzel-biotech.com/de/jobs
+    source_type: html
+
+  - name: Acromion
+    city: Köln
+    country: Germany
+    career_url: https://career-acromion-gmbh.com/
+    source_type: html
+
+  - name: b.fab
+    city: Köln
+    country: Germany
+    career_url: https://bfab.bio/about-us/jobs
+    source_type: html
+
+  - name: Evidenze
+    city: Köln
+    country: Germany
+    career_url: https://evidenze.com
+    source_type: html
+
+  - name: Detechgene
+    city: Köln
+    country: Germany
+    career_url: https://www.detechgene.de/career
+    source_type: html
+
+  # ── Monheim / Langenfeld area ──────────────────────────────────────────────
+
+  - name: Cube BioTech
+    city: Monheim
+    country: Germany
+    career_url: https://cube-biotech.com/information/job-opportunities/
+    source_type: html
+
+  - name: Resolve Bioscience
+    city: Monheim
+    country: Germany
+    career_url: https://resolvebiosciences.com/careers/
+    source_type: html
+
+  - name: Evoxx
+    city: Monheim
+    country: Germany
+    career_url: https://evoxx.com/people/jobs-and-career/
+    source_type: html
+
+  - name: Apontis
+    city: Monheim
+    country: Germany
+    career_url: https://apontis-pharma.de/karriere-bei-apontis-pharma
+    source_type: html
+
+  - name: AdhexPharma
+    city: Langenfeld
+    country: Germany
+    career_url: https://www.adhexpharma.com/de/karriere
+    source_type: html
+
+  # ── Dortmund area ──────────────────────────────────────────────────────────
+
+  - name: Chimera BioTec
+    city: Dortmund
+    country: Germany
+    career_url: https://www.chimera-biotec.com/about-us/career/
+    source_type: html
+
+  - name: Lead Discovery Center
+    city: Dortmund
+    country: Germany
+    career_url: https://www.lead-discovery.de/de/careers/
+    source_type: html
+
+  - name: Seregen
+    city: Dortmund
+    country: Germany
+    career_url: https://serengen.com/career/
+    source_type: html
+
+  - name: Protagene
+    city: Dortmund
+    country: Germany
+    career_url: https://careers.protagene.com/
+    source_type: html
+
+  # ── Leverkusen / Neuss / surrounding ──────────────────────────────────────
+
+  - name: Axplora
+    city: Leverkusen
+    country: Germany
+    career_url: https://www.axplora.com/work-at-axplora/
+    source_type: html
+
+  - name: Profil
+    city: Neuss
+    country: Germany
+    career_url: https://www.profil.com/organization/open-positions
+    source_type: html
+
+  # ── Bochum / Wuppertal ─────────────────────────────────────────────────────
+
+  - name: BetaSense
+    city: Bochum
+    country: Germany
+    career_url: https://www.beta-sense.de/en/career/
+    source_type: html
+
+  - name: Wuxi Biologics
+    city: Wuppertal
+    country: Germany
+    career_url: https://www.wuxibiologics.com/proud/
+    source_type: html
+
+  - name: atlas
+    city: Bochum
+    country: Germany
+    career_url: https://laserrobotarm.com/en/karriere/
+    source_type: html
+
+  # ── Bonn / Sankt Augustin ──────────────────────────────────────────────────
+
+  - name: BioSolveIT
+    city: Sankt Augustin
+    country: Germany
+    career_url: https://www.biosolveit.de/career/
+    source_type: html
+
+  - name: Dolorgiet
+    city: Sankt Augustin
+    country: Germany
+    career_url: https://www.dolorgiet.de/karriere
+    source_type: html
+
+  - name: Eurocor
+    city: Bonn
+    country: Germany
+    career_url: https://eurocor.de/eurocor/jobs-career
+    source_type: html
+
+  # ── Mönchengladbach / Essen / other NRW ────────────────────────────────────
+
+  - name: MLM Labs
+    city: Mönchengladbach
+    country: Germany
+    career_url: https://www.mlm-labs.com/careers-at-mlm/
+    source_type: html
+
+  - name: Diagenics
+    city: Essen
+    country: Germany
+    career_url: https://diagenics.com
+    source_type: html
+
+  - name: ClinStat
+    city: Hürth
+    country: Germany
+    career_url: https://clinstat.eu/careers/
+    source_type: html
+
+  - name: A&M Stabtest
+    city: Bergheim
+    country: Germany
+    career_url: https://www.am-labor.de/en/careers
+    source_type: html
+
+  - name: YMC Europe
+    city: Dinslaken
+    country: Germany
+    career_url: https://ymc.eu/recruitment.html
+    source_type: html

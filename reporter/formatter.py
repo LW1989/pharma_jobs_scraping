@@ -116,8 +116,30 @@ def _job_card_html(job: dict) -> str:
 </div>"""
 
 
-def build_email_html(jobs: list[dict], stats: dict | None = None) -> str:
-    """Build the full HTML email body for the given list of jobs."""
+_SECTION_HEADER_CSS = """
+.section-header { margin: 24px 24px 0; padding: 10px 16px;
+                  background: #e8eaf6; border-left: 4px solid #1a237e;
+                  font-size: 13px; font-weight: 700; color: #1a237e;
+                  text-transform: uppercase; letter-spacing: 0.6px; }
+"""
+
+
+def _section_header_html(text: str) -> str:
+    return f'<div class="section-header">{escape(text)}</div>'
+
+
+def build_email_html(
+    jobs: list[dict],
+    stats: dict | None = None,
+    company_jobs: list[dict] | None = None,
+) -> str:
+    """Build the full HTML email body.
+
+    Args:
+        jobs:         Pharmiweb jobs (scored, top-N).
+        stats:        Summary counts for the footer.
+        company_jobs: Company watchlist jobs (separate section, shown if non-empty).
+    """
     today = _date.today().strftime("%-d %b %Y")
     total = (stats or {}).get("total_evaluated", len(jobs))
     apply_count = sum(1 for j in jobs if j.get("should_apply"))
@@ -126,15 +148,31 @@ def build_email_html(jobs: list[dict], stats: dict | None = None) -> str:
     summary = f"{apply_count} job{'s' if apply_count != 1 else ''} to apply for"
     if review_count:
         summary += f" &nbsp;·&nbsp; {review_count} worth reviewing"
+    if company_jobs:
+        summary += f" &nbsp;·&nbsp; {len(company_jobs)} new from watchlist"
 
-    cards_html = "".join(_job_card_html(j) for j in jobs)
+    # Section 1 — pharmiweb jobs
+    pharmiweb_section = ""
+    if jobs:
+        pharmiweb_section = (
+            _section_header_html("Top Jobs from pharmiweb.jobs")
+            + "".join(_job_card_html(j) for j in jobs)
+        )
+
+    # Section 2 — company watchlist jobs
+    company_section = ""
+    if company_jobs:
+        company_section = (
+            _section_header_html("New from Your Company Watchlist")
+            + "".join(_job_card_html(j) for j in company_jobs)
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>{_EMAIL_CSS}</style>
+<style>{_EMAIL_CSS}{_SECTION_HEADER_CSS}</style>
 </head>
 <body>
 <div class="wrapper">
@@ -142,7 +180,8 @@ def build_email_html(jobs: list[dict], stats: dict | None = None) -> str:
     <h1>Pharma Job Digest &nbsp;&middot;&nbsp; {today}</h1>
     <p>{summary}</p>
   </div>
-  {cards_html}
+  {pharmiweb_section}
+  {company_section}
   <div class="footer">
     Evaluated {total} active jobs &nbsp;&middot;&nbsp; {today}
     &nbsp;&middot;&nbsp; PharmaJobScraper
@@ -156,8 +195,18 @@ def build_email_html(jobs: list[dict], stats: dict | None = None) -> str:
 # Telegram message
 # ---------------------------------------------------------------------------
 
-def build_telegram_text(jobs: list[dict], top_n: int = 5) -> str:
-    """Build the compact Telegram HTML message for the top-N jobs."""
+def build_telegram_text(
+    jobs: list[dict],
+    top_n: int = 5,
+    company_jobs: list[dict] | None = None,
+) -> str:
+    """Build the compact Telegram HTML message.
+
+    Args:
+        jobs:         Pharmiweb jobs.
+        top_n:        How many pharmiweb jobs to include.
+        company_jobs: Company watchlist jobs (compact bullet list, appended if non-empty).
+    """
     today = _date.today().strftime("%-d %b %Y")
     subset = jobs[:top_n]
 
@@ -186,5 +235,16 @@ def build_telegram_text(jobs: list[dict], top_n: int = 5) -> str:
     lines.append(
         f"\n📧 Full report ({len(jobs)} jobs + AI reasoning) sent to your email."
     )
+
+    # Section 2 — company watchlist (compact bullets)
+    if company_jobs:
+        lines.append(f"\n\n🏢 <b>Company watchlist — {len(company_jobs)} new today:</b>")
+        for job in company_jobs:
+            title = escape(job.get("title") or "—")
+            employer = escape(job.get("employer") or "—")
+            url = job.get("url") or ""
+            score = job.get("score")
+            score_str = f" · ⭐{int(score)}" if score is not None else ""
+            lines.append(f"• <b>{title}</b> @ {employer}{score_str}\n  🔗 {url}")
 
     return "\n".join(lines)

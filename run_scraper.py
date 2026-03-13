@@ -17,7 +17,7 @@ from datetime import datetime
 
 from scraper import config
 from scraper.db import (
-    get_all_job_ids,
+    get_job_ids_by_source,
     insert_job,
     mark_jobs_active,
     mark_jobs_inactive,
@@ -60,7 +60,7 @@ def main() -> None:
     # Step 2: Compare with the database
     # ------------------------------------------------------------------
     logger.info("Step 2 – Comparing with database …")
-    db_ids = get_all_job_ids()
+    db_ids = get_job_ids_by_source("pharmiweb")
 
     new_ids = live_ids - db_ids
     known_ids = live_ids & db_ids
