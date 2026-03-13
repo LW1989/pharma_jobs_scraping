@@ -38,8 +38,10 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
             )
 
     # --- Location (two-path: remote needs country, on-site/hybrid needs city) ---
+    # company_direct jobs bypass location filtering — the user explicitly chose
+    # those companies and wants all their jobs evaluated regardless of city.
     location_cfg = filters.get("location", {})
-    if location_cfg:
+    if location_cfg and job.get("source") != "company_direct":
         remote_kws = location_cfg.get("remote_keywords", [])
         countries  = location_cfg.get("allowed_countries", [])
         cities     = location_cfg.get("allowed_cities", [])

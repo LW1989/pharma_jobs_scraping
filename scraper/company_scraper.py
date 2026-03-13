@@ -5,10 +5,16 @@ Fetches open job listings from a curated list of NRW pharma/biotech companies
 that post on their own career pages rather than on pharmiweb.jobs.
 
 Supports four source_type modes:
-  personio  — Personio JSON API  (https://{slug}.jobs.personio.de/api/v1/jobs)
+  personio  — Personio XML feed  (https://{slug}.jobs.personio.de/xml)
   workable  — Workable JSON API  (https://apply.workable.com/api/v3/accounts/{slug}/jobs)
   recruitee — Recruitee JSON API (https://{slug}.recruitee.com/api/offers)
-  html      — Generic HTML fetch + OpenAI LLM extraction
+  html      — Generic HTML fetch + OpenAI Structured Outputs listing extraction,
+              followed by individual job-page fetch for full descriptions
+
+Two-step approach for html companies (mirrors pharmiweb):
+  Step 1 — Fetch career listing page → LLM extracts {title, url, location}
+  Step 2 — For each job with a distinct URL, fetch that page → BeautifulSoup
+            text → stored as job_details (no second LLM call)
 
 Public API:
     fetch_jobs(company: dict) -> list[dict]
@@ -23,7 +29,6 @@ import hashlib
 import logging
 import time
 import xml.etree.ElementTree as ET
-from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
@@ -48,12 +53,39 @@ def _openai() -> OpenAI:
 
 
 # ---------------------------------------------------------------------------
-# Stable job_id: MD5(company_name + job_title)[:16]
+# Stable job_id: MD5(company_name + job_title + location)[:16]
 # ---------------------------------------------------------------------------
 
 def _make_job_id(company_name: str, title: str, location: str = "") -> str:
     raw = f"{company_name.lower().strip()}|{title.lower().strip()}|{location.lower().strip()}"
     return hashlib.md5(raw.encode()).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
+# Shared detail-page text fetcher (Step 2 for html companies)
+# ---------------------------------------------------------------------------
+
+def _fetch_detail_text(url: str, career_url: str) -> str:
+    """
+    Fetch a single job detail page and return cleaned plain text.
+
+    Returns empty string if:
+    - url is the same as the career listing page (no distinct detail page)
+    - the fetch fails for any reason
+    """
+    if not url or url.rstrip("/") == career_url.rstrip("/"):
+        return ""
+    try:
+        resp = _SESSION.get(url, timeout=config.REQUEST_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+        for tag in soup(["script", "style", "nav", "footer", "head", "header"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        return text[:6000]
+    except Exception as exc:
+        logger.debug("Could not fetch detail page %s: %s", url, exc)
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -92,13 +124,14 @@ def fetch_jobs(company: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# ATS JSON API fetchers
+# ATS JSON/XML API fetchers
 # ---------------------------------------------------------------------------
 
 def _fetch_personio(company: dict) -> list[dict]:
     """
-    Uses the Personio XML feed (/xml) which is a public, stable endpoint.
-    The /api/v1/jobs path returns an HTML page for most Personio accounts.
+    Uses the Personio XML feed (/xml) which is a stable public endpoint.
+    The /api/v1/jobs path returns HTML for most accounts.
+    Full job descriptions are embedded in the XML as <jobDescriptions>.
     """
     slug = company["slug"]
     url = f"https://{slug}.jobs.personio.de/xml"
@@ -111,12 +144,28 @@ def _fetch_personio(company: dict) -> list[dict]:
         title = (position.findtext("name") or "").strip()
         if not title:
             continue
+
         job_id_val = position.findtext("id") or ""
         job_url = f"https://{slug}.jobs.personio.de/job/{job_id_val}" if job_id_val else url
         office = position.findtext("office") or ""
-        department = position.findtext("department") or ""
-        location = office or department
-        jobs.append(_build_job(company, title, job_url, location))
+        location = office or company.get("city", "")
+
+        # Extract full job description from embedded XML sections
+        sections = []
+        for jd in position.findall(".//jobDescription"):
+            section_name = (jd.findtext("name") or "").strip()
+            raw_html = jd.findtext("value") or ""
+            if raw_html:
+                section_text = BeautifulSoup(raw_html, "lxml").get_text(
+                    separator=" ", strip=True
+                )
+                if section_name:
+                    sections.append(f"{section_name}:\n{section_text}")
+                else:
+                    sections.append(section_text)
+        job_details = "\n\n".join(sections)
+
+        jobs.append(_build_job(company, title, job_url, location, job_details))
     return jobs
 
 
@@ -142,8 +191,12 @@ def _fetch_workable(company: dict) -> list[dict]:
         ]))
         shortcode = item.get("shortcode") or item.get("id") or ""
         job_url = f"https://apply.workable.com/{slug}/j/{shortcode}/"
-        department = item.get("department") or ""
-        jobs.append(_build_job(company, title, job_url, loc_str, department))
+
+        # Workable listing API doesn't include description; fetch the detail page
+        job_details = _fetch_detail_text(job_url, company["career_url"])
+
+        jobs.append(_build_job(company, title, job_url, loc_str, job_details))
+        time.sleep(config.REQUEST_DELAY_SECONDS)
     return jobs
 
 
@@ -160,21 +213,40 @@ def _fetch_recruitee(company: dict) -> list[dict]:
         if not title:
             continue
         location = item.get("location") or item.get("city") or ""
-        job_url = item.get("careers_url") or f"https://{slug}.recruitee.com/o/{item.get('slug', '')}"
-        department = item.get("department") or ""
-        jobs.append(_build_job(company, title, job_url, location, department))
+        job_url = (
+            item.get("careers_url")
+            or f"https://{slug}.recruitee.com/o/{item.get('slug', '')}"
+        )
+
+        # Recruitee API includes description HTML in "description" field
+        raw_description = item.get("description") or ""
+        if raw_description:
+            job_details = BeautifulSoup(raw_description, "lxml").get_text(
+                separator="\n", strip=True
+            )[:6000]
+        else:
+            job_details = _fetch_detail_text(job_url, company["career_url"])
+
+        jobs.append(_build_job(company, title, job_url, location, job_details))
     return jobs
 
 
 # ---------------------------------------------------------------------------
-# Generic HTML + LLM extractor
+# Generic HTML + LLM listing extractor (Step 1) + detail page fetch (Step 2)
 # ---------------------------------------------------------------------------
 
+_EXTRACTION_SYSTEM_PROMPT = (
+    "You are a precise data extraction assistant. Your only task is to extract "
+    "structured job listing data from the text of a company career page. "
+    "Extract only what is explicitly present — do not infer, invent, or paraphrase. "
+    "If a field is not present on the page, return an empty string for that field."
+)
+
+
 class _JobListing(BaseModel):
-    title: str
-    url: str
-    location: str
-    description: str
+    title: str        # Exact job title as written on the page
+    url: str          # Direct URL to this job posting if visible; otherwise empty string
+    location: str     # City/country/region as written; 'Remote' if stated; empty if not mentioned
 
 
 class _JobListings(BaseModel):
@@ -182,20 +254,22 @@ class _JobListings(BaseModel):
 
 
 def _fetch_html_llm(company: dict) -> list[dict]:
+    """
+    Two-step extraction:
+      Step 1 — LLM extracts job listing (title, url, location) from career page text.
+      Step 2 — For each job with a distinct URL, fetch that page and store the
+               full text as job_details. No second LLM call.
+    """
     career_url = company["career_url"]
 
     resp = _SESSION.get(career_url, timeout=config.REQUEST_TIMEOUT_SECONDS)
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "lxml")
-
-    # Remove noise: scripts, styles, nav, footer
-    for tag in soup(["script", "style", "nav", "footer", "head"]):
+    for tag in soup(["script", "style", "nav", "footer", "head", "header"]):
         tag.decompose()
 
     page_text = soup.get_text(separator="\n", strip=True)
-
-    # Truncate to keep token cost low (~8000 chars covers any career listing page)
     page_text = page_text[:8000]
 
     if len(page_text) < 50:
@@ -204,38 +278,55 @@ def _fetch_html_llm(company: dict) -> list[dict]:
         return []
 
     prompt = (
-        "You are given the text content of a company career page.\n"
-        "Extract all open job listings. For each job return:\n"
-        "  - title: job title (string)\n"
-        "  - url: direct link to the job posting if visible, otherwise use the career page URL\n"
-        "  - location: city/country or 'Remote' if specified\n"
-        "  - description: one-sentence summary of the role\n\n"
-        "If no jobs are listed, return an empty jobs array.\n\n"
+        "Extract all open job listings from the career page text below.\n\n"
+        "Rules:\n"
+        "- title: exact job title as written; skip generic entries like "
+        "'Spontaneous Application' or 'No positions available'\n"
+        "- url: the direct link to this specific job posting if visible on this page; "
+        "otherwise empty string (do NOT use the career page URL as a fallback)\n"
+        "- location: city/country/region exactly as written; 'Remote' if explicitly stated; "
+        "empty string if not mentioned\n"
+        "- If the page shows 'no open positions', 'check back later', or similar, "
+        "return an empty jobs array\n"
+        "- Do not include section headers, navigation items, or company boilerplate "
+        "as job titles\n\n"
         f"Career page URL: {career_url}\n\n"
         f"Page content:\n{page_text}"
     )
 
     response = _openai().beta.chat.completions.parse(
         model=config.OPENAI_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": _EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
         response_format=_JobListings,
     )
 
     listings = response.choices[0].message.parsed
-    if not listings:
+    if not listings or not listings.jobs:
         return []
 
     jobs = []
     for item in listings.jobs:
         if not item.title:
             continue
+
+        # Step 2: fetch the individual job detail page for full description
+        job_url = item.url or career_url
+        job_details = _fetch_detail_text(job_url, career_url)
+
         jobs.append(_build_job(
             company,
             title=item.title,
-            url=item.url or career_url,
+            url=job_url,
             location=item.location,
-            job_details=item.description,
+            job_details=job_details,
         ))
+        # Brief delay between detail page fetches to be polite
+        if item.url and item.url.rstrip("/") != career_url.rstrip("/"):
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+
     return jobs
 
 
@@ -259,19 +350,19 @@ def _build_job(
         location = ", ".join(filter(None, [city, country]))
 
     return {
-        "job_id":          _make_job_id(company_name, title, location),
-        "title":           title,
-        "url":             url,
-        "employer":        company_name,
-        "location":        location,
-        "job_details":     job_details,
-        "source":          "company_direct",
+        "job_id":           _make_job_id(company_name, title, location),
+        "title":            title,
+        "url":              url,
+        "employer":         company_name,
+        "location":         location,
+        "job_details":      job_details,
+        "source":           "company_direct",
         # Fields not available from career pages — set to None
-        "salary":          None,
-        "start_date":      None,
-        "closing_date":    None,
-        "discipline":      None,
-        "hours":           None,
-        "contract_type":   None,
+        "salary":           None,
+        "start_date":       None,
+        "closing_date":     None,
+        "discipline":       None,
+        "hours":            None,
+        "contract_type":    None,
         "experience_level": None,
     }
