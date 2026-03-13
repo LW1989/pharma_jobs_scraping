@@ -63,29 +63,39 @@ def main() -> None:
     logger.info("Config:  email top-%d  |  telegram top-%d  |  min_score=%d",
                 top_email, top_telegram, min_score)
 
-    # Step 1 — fetch unsent jobs
-    logger.info("Step 1 – Fetching up to %d unsent evaluated jobs …", top_email)
+    # Step 1 — fetch unsent jobs from both sources
+    logger.info("Step 1 – Fetching unsent evaluated jobs …")
     jobs = reporter.db.fetch_unsent_jobs(limit=top_email, min_score=min_score)
+    company_jobs = reporter.db.fetch_unsent_company_jobs()
 
-    if not jobs:
+    logger.info("  pharmiweb: %d job(s)  |  company watchlist: %d job(s)",
+                len(jobs), len(company_jobs))
+
+    if not jobs and not company_jobs:
         logger.info("No unsent evaluated jobs found. Nothing to report.")
         logger.info("=" * 60)
         return
 
-    logger.info("Found %d job(s) to report.", len(jobs))
     for j in jobs:
         flag = "APPLY" if j.get("should_apply") else "review"
-        logger.info("  %3d/100  [%s]  %s @ %s",
+        logger.info("  [pharmiweb]  %3d/100  [%s]  %s @ %s",
                     j.get("score", 0), flag,
                     (j.get("title") or "")[:50], j.get("employer") or "")
+    for j in company_jobs:
+        score_str = f"{int(j.get('score') or 0)}/100" if j.get("score") is not None else "unscored"
+        logger.info("  [watchlist]  %s  %s @ %s",
+                    score_str, (j.get("title") or "")[:50], j.get("employer") or "")
 
     # Step 2 — build and send email
     logger.info("-" * 60)
     logger.info("Step 2 – Sending email report to %s …", config.REPORT_TO or "(not configured)")
     stats = reporter.db.count_evaluated_today()
-    html_body = reporter.formatter.build_email_html(jobs, stats=stats)
+    html_body = reporter.formatter.build_email_html(
+        jobs, stats=stats, company_jobs=company_jobs or None
+    )
+    total_count = len(jobs) + len(company_jobs)
     subject = (
-        f"Pharma Job Digest — {len(jobs)} match{'es' if len(jobs) != 1 else ''}"
+        f"Pharma Job Digest — {total_count} match{'es' if total_count != 1 else ''}"
         f" — {date.today().strftime('%-d %b %Y')}"
     )
     email_sent = False
@@ -99,23 +109,25 @@ def main() -> None:
 
     # Step 3 — build and send Telegram
     logger.info("-" * 60)
-    logger.info("Step 3 – Sending Telegram digest (top %d) …", top_telegram)
-    tg_text = reporter.formatter.build_telegram_text(jobs, top_n=top_telegram)
+    logger.info("Step 3 – Sending Telegram digest (top %d pharmiweb + watchlist) …", top_telegram)
+    tg_text = reporter.formatter.build_telegram_text(
+        jobs, top_n=top_telegram, company_jobs=company_jobs or None
+    )
     try:
         reporter.telegram_sender.send(tg_text)
     except Exception as exc:
         logger.warning("Telegram send failed (email was delivered): %s", exc)
         # Do not abort — email already delivered, still mark as sent
 
-    # Step 4 — mark as sent
+    # Step 4 — mark both sources as sent
     logger.info("-" * 60)
-    logger.info("Step 4 – Marking %d job(s) as sent …", len(jobs))
-    job_ids = [j["job_id"] for j in jobs]
-    reporter.db.mark_as_sent(job_ids)
+    all_ids = [j["job_id"] for j in jobs + company_jobs]
+    logger.info("Step 4 – Marking %d job(s) as sent …", len(all_ids))
+    reporter.db.mark_as_sent(all_ids)
 
     logger.info("=" * 60)
-    logger.info("Done. Reported %d job(s). Email: %s | Telegram: attempted.",
-                len(jobs), "OK" if email_sent else "FAILED")
+    logger.info("Done. Reported %d pharmiweb + %d watchlist job(s). Email: %s | Telegram: attempted.",
+                len(jobs), len(company_jobs), "OK" if email_sent else "FAILED")
     logger.info("=" * 60)
 
 

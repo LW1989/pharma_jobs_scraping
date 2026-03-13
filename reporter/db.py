@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 def fetch_unsent_jobs(limit: int = 10, min_score: int = 0) -> list[dict]:
     """
-    Return evaluated jobs that have not yet been reported, ordered by score descending.
+    Return evaluated pharmiweb jobs that have not yet been reported,
+    ordered by score descending.
 
     Args:
         limit:      Maximum number of jobs to return.
@@ -31,11 +32,34 @@ def fetch_unsent_jobs(limit: int = 10, min_score: int = 0) -> list[dict]:
           AND evaluated         = TRUE
           AND (job_sent = FALSE OR job_sent IS NULL)
           AND score             >= %s
+          AND (source = 'pharmiweb' OR source IS NULL)
         ORDER BY score DESC NULLS LAST
         LIMIT %s
     """
     with get_cursor() as cur:
         cur.execute(sql, (min_score, limit))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def fetch_unsent_company_jobs() -> list[dict]:
+    """
+    Return evaluated company_direct jobs that have not yet been reported,
+    ordered by score descending. No row limit — typically only a handful per day.
+    """
+    sql = """
+        SELECT
+            job_id, title, employer, location,
+            score, score_reasoning, should_apply, url,
+            contract_type, hours
+        FROM jobs
+        WHERE source            = 'company_direct'
+          AND job_active        = TRUE
+          AND evaluated         = TRUE
+          AND (job_sent = FALSE OR job_sent IS NULL)
+        ORDER BY score DESC NULLS LAST
+    """
+    with get_cursor() as cur:
+        cur.execute(sql)
         return [dict(row) for row in cur.fetchall()]
 
 

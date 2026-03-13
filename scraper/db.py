@@ -85,6 +85,21 @@ def get_all_job_ids() -> set[str]:
         return {row["job_id"] for row in cur.fetchall()}
 
 
+def get_job_ids_by_source(source: str) -> set[str]:
+    """Return all job IDs for a specific source.
+
+    Treats NULL source rows as 'pharmiweb' for backward compatibility
+    with jobs inserted before the source column was added.
+    """
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT job_id FROM jobs WHERE source = %s"
+            " OR (source IS NULL AND %s = 'pharmiweb')",
+            (source, source),
+        )
+        return {row["job_id"] for row in cur.fetchall()}
+
+
 def insert_job(job: dict) -> None:
     today = date.today()
     sql = """
@@ -92,17 +107,18 @@ def insert_job(job: dict) -> None:
             job_id, url, title, employer, location, salary,
             start_date, closing_date, discipline, hours,
             contract_type, experience_level, job_details,
-            first_seen, last_seen, job_active
+            first_seen, last_seen, job_active, source
         ) VALUES (
             %(job_id)s, %(url)s, %(title)s, %(employer)s, %(location)s, %(salary)s,
             %(start_date)s, %(closing_date)s, %(discipline)s, %(hours)s,
             %(contract_type)s, %(experience_level)s, %(job_details)s,
-            %(first_seen)s, %(last_seen)s, TRUE
+            %(first_seen)s, %(last_seen)s, TRUE, %(source)s
         )
         ON CONFLICT (job_id) DO NOTHING
     """
     job.setdefault("first_seen", today)
     job.setdefault("last_seen", today)
+    job.setdefault("source", "pharmiweb")
     with get_cursor() as cur:
         cur.execute(sql, job)
     logger.debug("Inserted job %s: %s", job["job_id"], job.get("title"))

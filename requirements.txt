@@ -6,3 +6,5 @@ python-dotenv
 openai
 pyyaml
 tenacity
+gspread
+google-auth

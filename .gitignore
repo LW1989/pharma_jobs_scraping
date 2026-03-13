@@ -47,3 +47,6 @@ _test_email.html
 # Archived / superseded docs — not part of the active codebase
 start_here/_archive/
 not used md files/
+
+# Google service account key — contains private credentials, never commit
+input_data/google_credentials.json

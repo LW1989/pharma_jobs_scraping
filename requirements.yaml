@@ -294,12 +294,12 @@ cv_synthesis:
 
 reporting:
   # Number of jobs to include in the email report.
-  top_jobs_email: 10
+  top_jobs_email: 5
 
   # Number of jobs to include in the Telegram digest.
-  top_jobs_telegram: 5
+  top_jobs_telegram: 3
 
   # Minimum score a job must have to be included in the report.
   # 0 = always include the top-N regardless of score (recommended).
   # Set to e.g. 50 to suppress very weak matches on quiet days.
-  min_score_to_report: 0
+  min_score_to_report: 50

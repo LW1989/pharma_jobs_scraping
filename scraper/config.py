@@ -24,6 +24,12 @@ REPORT_TO     = os.environ.get("REPORT_TO", "")   # comma-separated recipients
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# Google Sheets API — required only for scripts/sync_companies_from_sheet.py
+GOOGLE_SHEET_ID         = os.environ.get("GOOGLE_SHEET_ID", "")
+GOOGLE_CREDENTIALS_FILE = os.environ.get(
+    "GOOGLE_CREDENTIALS_FILE", "input_data/google_credentials.json"
+)
+
 # Pricing per 1M tokens (input / output) used for cost estimation in evaluation_runs.
 # Source: https://openai.com/api/pricing/ — verified March 2026
 OPENAI_PRICING: dict[str, dict[str, float]] = {
