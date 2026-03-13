@@ -298,3 +298,21 @@ companies:
     country: Germany
     career_url: https://ymc.eu/recruitment.html
     source_type: html
+
+  - name: MARCO Institut
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.marco-institut.de/jobs/
+    source_type: html
+
+  - name: PFMmedical
+    city: Köln
+    country: Germany
+    career_url: https://www.pfmmedical.de/karriere/jobs-bei-pfm-medical/
+    source_type: html
+
+  - name: Taconic
+    city: Cologne
+    country: Germany
+    career_url: https://www.taconic.com/about/careers#career-opportunities
+    source_type: html
