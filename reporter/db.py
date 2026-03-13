@@ -43,8 +43,9 @@ def fetch_unsent_jobs(limit: int = 10, min_score: int = 0) -> list[dict]:
 
 def fetch_unsent_company_jobs() -> list[dict]:
     """
-    Return evaluated company_direct jobs that have not yet been reported,
-    ordered by score descending. No row limit — typically only a handful per day.
+    Return evaluated company_direct jobs that passed pre-screening and have
+    not yet been reported, ordered by score descending.
+    No row limit — typically only a handful per day.
     """
     sql = """
         SELECT
@@ -52,9 +53,10 @@ def fetch_unsent_company_jobs() -> list[dict]:
             score, score_reasoning, should_apply, url,
             contract_type, hours
         FROM jobs
-        WHERE source            = 'company_direct'
-          AND job_active        = TRUE
-          AND evaluated         = TRUE
+        WHERE source              = 'company_direct'
+          AND job_active          = TRUE
+          AND evaluated           = TRUE
+          AND passed_prescreening = TRUE
           AND (job_sent = FALSE OR job_sent IS NULL)
         ORDER BY score DESC NULLS LAST
     """

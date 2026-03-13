@@ -18,9 +18,14 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
         (True,  "Passed pre-screening")          if all filters pass
         (False, "Pre-screened out: <reason>")    if any filter fails
     """
+    # company_direct jobs bypass structured-field filters (contract_type, hours,
+    # experience_level, location) because career pages don't provide those fields.
+    # Only title-keyword filters (exclude_title_keywords, tier_3) still apply.
+    is_company_direct = job.get("source") == "company_direct"
+
     # --- Contract type ---
     allowed_contract_types = filters.get("contract_types", [])
-    if allowed_contract_types:
+    if allowed_contract_types and not is_company_direct:
         value = (job.get("contract_type") or "").strip()
         if value not in allowed_contract_types:
             return False, (
@@ -30,7 +35,7 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
 
     # --- Hours ---
     allowed_hours = filters.get("hours", [])
-    if allowed_hours:
+    if allowed_hours and not is_company_direct:
         value = (job.get("hours") or "").strip()
         if value not in allowed_hours:
             return False, (
@@ -68,7 +73,7 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
 
     # --- Experience level ---
     allowed_experience = filters.get("experience_levels", [])
-    if allowed_experience:
+    if allowed_experience and not is_company_direct:
         value = (job.get("experience_level") or "").strip()
         if value not in allowed_experience:
             return False, (
