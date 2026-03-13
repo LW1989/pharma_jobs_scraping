@@ -66,12 +66,16 @@ def main() -> None:
     # Step 1 — fetch unsent jobs from both sources
     logger.info("Step 1 – Fetching unsent evaluated jobs …")
     jobs = reporter.db.fetch_unsent_jobs(limit=top_email, min_score=min_score)
-    company_jobs = reporter.db.fetch_unsent_company_jobs()
+    company_jobs = reporter.db.fetch_unsent_company_jobs(min_score=min_score)
+    company_jobs_found = reporter.db.count_unsent_company_jobs()
 
-    logger.info("  pharmiweb: %d job(s)  |  company watchlist: %d job(s)",
-                len(jobs), len(company_jobs))
+    logger.info(
+        "  pharmiweb: %d job(s)  |  company watchlist: %d job(s) shown "
+        "(%d found before threshold)",
+        len(jobs), len(company_jobs), company_jobs_found,
+    )
 
-    if not jobs and not company_jobs:
+    if not jobs and not company_jobs_found:
         logger.info("No unsent evaluated jobs found. Nothing to report.")
         logger.info("=" * 60)
         return
@@ -91,7 +95,11 @@ def main() -> None:
     logger.info("Step 2 – Sending email report to %s …", config.REPORT_TO or "(not configured)")
     stats = reporter.db.count_evaluated_today()
     html_body = reporter.formatter.build_email_html(
-        jobs, stats=stats, company_jobs=company_jobs or None
+        jobs,
+        stats=stats,
+        company_jobs=company_jobs or None,
+        company_jobs_found=company_jobs_found,
+        min_score=min_score,
     )
     total_count = len(jobs) + len(company_jobs)
     subject = (
@@ -111,7 +119,11 @@ def main() -> None:
     logger.info("-" * 60)
     logger.info("Step 3 – Sending Telegram digest (top %d pharmiweb + watchlist) …", top_telegram)
     tg_text = reporter.formatter.build_telegram_text(
-        jobs, top_n=top_telegram, company_jobs=company_jobs or None
+        jobs,
+        top_n=top_telegram,
+        company_jobs=company_jobs or None,
+        company_jobs_found=company_jobs_found,
+        min_score=min_score,
     )
     try:
         reporter.telegram_sender.send(tg_text)

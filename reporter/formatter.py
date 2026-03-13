@@ -132,13 +132,19 @@ def build_email_html(
     jobs: list[dict],
     stats: dict | None = None,
     company_jobs: list[dict] | None = None,
+    company_jobs_found: int = 0,
+    min_score: int = 0,
 ) -> str:
     """Build the full HTML email body.
 
     Args:
-        jobs:         Pharmiweb jobs (scored, top-N).
-        stats:        Summary counts for the footer.
-        company_jobs: Company watchlist jobs (separate section, shown if non-empty).
+        jobs:               Pharmiweb jobs (scored, top-N).
+        stats:              Summary counts for the footer.
+        company_jobs:       Company watchlist jobs above the score threshold.
+        company_jobs_found: Total company jobs that passed prescreening
+                            (including those below the threshold). Used to
+                            show a 'found but not shown' note.
+        min_score:          The minimum score threshold (for the note text).
     """
     today = _date.today().strftime("%-d %b %Y")
     total = (stats or {}).get("total_evaluated", len(jobs))
@@ -150,6 +156,8 @@ def build_email_html(
         summary += f" &nbsp;·&nbsp; {review_count} worth reviewing"
     if company_jobs:
         summary += f" &nbsp;·&nbsp; {len(company_jobs)} new from watchlist"
+    elif company_jobs_found:
+        summary += f" &nbsp;·&nbsp; {company_jobs_found} watchlist job{'s' if company_jobs_found != 1 else ''} found (below threshold)"
 
     # Section 1 — pharmiweb jobs
     pharmiweb_section = ""
@@ -166,6 +174,18 @@ def build_email_html(
             _section_header_html("New from Your Company Watchlist")
             + "".join(_job_card_html(j) for j in company_jobs)
         )
+    elif company_jobs_found:
+        threshold_note = (
+            f'<div style="margin:16px 24px;padding:14px 18px;background:#f9f9f9;'
+            f'border:1px solid #e0e0e0;border-radius:8px;font-size:13px;color:#616161;">'
+            f'<strong style="color:#212121;">Company Watchlist</strong><br>'
+            f'{company_jobs_found} new job{"s" if company_jobs_found != 1 else ""} '
+            f'found in your company watchlist, but '
+            f'{"none" if company_jobs_found > 0 else "it"} scored {min_score}+/100. '
+            f'They will be included when the score threshold is met.'
+            f'</div>'
+        )
+        company_section = threshold_note
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -199,13 +219,17 @@ def build_telegram_text(
     jobs: list[dict],
     top_n: int = 5,
     company_jobs: list[dict] | None = None,
+    company_jobs_found: int = 0,
+    min_score: int = 0,
 ) -> str:
     """Build the compact Telegram HTML message.
 
     Args:
-        jobs:         Pharmiweb jobs.
-        top_n:        How many pharmiweb jobs to include.
-        company_jobs: Company watchlist jobs (compact bullet list, appended if non-empty).
+        jobs:               Pharmiweb jobs.
+        top_n:              How many pharmiweb jobs to include.
+        company_jobs:       Company watchlist jobs above the score threshold.
+        company_jobs_found: Total company jobs that passed prescreening.
+        min_score:          The minimum score threshold (for the note text).
     """
     today = _date.today().strftime("%-d %b %Y")
     subset = jobs[:top_n]
@@ -246,5 +270,11 @@ def build_telegram_text(
             score = job.get("score")
             score_str = f" · ⭐{int(score)}" if score is not None else ""
             lines.append(f"• <b>{title}</b> @ {employer}{score_str}\n  🔗 {url}")
+    elif company_jobs_found:
+        lines.append(
+            f"\n\n🏢 <b>Company watchlist:</b> {company_jobs_found} new job"
+            f"{'s' if company_jobs_found != 1 else ''} found but none scored "
+            f"{min_score}+/100."
+        )
 
     return "\n".join(lines)
