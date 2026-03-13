@@ -41,10 +41,14 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPANIES_PATH = ROOT / "input_data" / "companies.yaml"
 
 # Column indices (0-based) in the Google Sheet
+# A=Company, B=City, C=Profile, D=Jobs, E=Accept Initiative Applications, F=Open positions, G=Interesting
 COL_COMPANY = 0
 COL_CITY    = 1
 COL_PROFILE = 2
-COL_JOBS    = 3   # career URL
+COL_JOBS    = 3   # career URL (may be a URL, "Yes", "No", or empty)
+# Columns E and G are intentionally NOT used for filtering — we include every
+# company that has a scrapable career URL regardless of whether they accept
+# unsolicited applications or how "interesting" they are.
 
 
 def _detect_source_type(url: str) -> tuple[str, str | None]:
@@ -118,25 +122,37 @@ def _fetch_sheet_rows() -> list[dict]:
         while len(row) < 4:
             row.append("")
 
-        name = row[COL_COMPANY].strip()
-        city = row[COL_CITY].strip()
-        career_url = row[COL_JOBS].strip()
+        name     = row[COL_COMPANY].strip()
+        jobs_col = row[COL_JOBS].strip()
+        profile  = row[COL_PROFILE].strip() if len(row) > COL_PROFILE else ""
 
-        # Skip header rows, empty rows, or rows with no career URL
-        if not name or not career_url or name.lower() in ("company", ""):
+        # Skip header row, empty rows, and the job-hub aggregate row
+        if not name or name.lower() in ("company", "") or name.startswith("http"):
             continue
-        # Skip rows where career URL looks like a profile URL (no jobs page listed yet)
-        if career_url.lower() in ("no", "yes", ""):
+
+        # Resolve career URL:
+        #   - Jobs column has a URL         → use it directly
+        #   - Jobs column is "Yes"          → career page = Profile column URL
+        #   - Jobs column is "No" or empty  → no scrapable page, skip entirely
+        if jobs_col.startswith("http"):
+            career_url = jobs_col
+        elif jobs_col.lower() == "yes" and profile.startswith("http"):
+            career_url = profile
+        else:
+            # "No", empty, or unparseable — nothing to scrape
             continue
-        # Skip rows where career_url starts with "http" but COL_JOBS was actually COL_PROFILE
-        # (i.e. the jobs column is blank and the profile was shifted)
+
+        # City: use column B if it looks like a city name, not a URL
+        city = row[COL_CITY].strip() if len(row) > COL_CITY else ""
+        if city.startswith("http"):
+            city = ""   # malformed row (URL ended up in city column)
 
         source_type, slug = _detect_source_type(career_url)
         entry: dict = {
-            "name":       name,
-            "city":       city,
-            "country":    "Germany",
-            "career_url": career_url,
+            "name":        name,
+            "city":        city,
+            "country":     "Germany",
+            "career_url":  career_url,
             "source_type": source_type,
         }
         if slug:
