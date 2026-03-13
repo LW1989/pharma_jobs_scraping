@@ -25,7 +25,8 @@ def get_jobs_to_evaluate(cv_version: str) -> list[dict]:
         SELECT
             job_id, title, employer, location, salary,
             start_date, closing_date, discipline, hours,
-            contract_type, experience_level, job_details, url
+            contract_type, experience_level, job_details, url,
+            source
         FROM jobs
         WHERE job_active = TRUE
           AND (evaluated = FALSE OR cv_version IS DISTINCT FROM %s)
