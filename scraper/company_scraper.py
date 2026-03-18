@@ -29,6 +29,7 @@ import hashlib
 import logging
 import time
 import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -41,6 +42,64 @@ logger = logging.getLogger(__name__)
 
 _SESSION = requests.Session()
 _SESSION.headers.update(config.HEADERS)
+
+_IPV4_HTTP_APPLIED = False
+
+
+def _apply_ipv4_only_http(reason: str) -> None:
+    """Prefer IPv4 for urllib3/requests (fixes connect timeouts when AAAA is broken)."""
+    global _IPV4_HTTP_APPLIED
+    if _IPV4_HTTP_APPLIED:
+        return
+    import socket
+
+    try:
+        import urllib3.util.connection as urllib3_conn
+    except ImportError:
+        return
+    urllib3_conn.allowed_gai_family = lambda: socket.AF_INET
+    _IPV4_HTTP_APPLIED = True
+    logger.info("IPv4-only HTTP resolution enabled (%s)", reason)
+
+
+if config.COMPANY_SCRAPER_FORCE_IPV4:
+    _apply_ipv4_only_http("COMPANY_SCRAPER_FORCE_IPV4 in .env")
+
+# TYPO3 / some WAFs return 403 on deep links until a session cookie is set on the site root.
+_HTML_BROWSER_HEADERS = {
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
+
+def _origin(url: str) -> str:
+    p = urlparse(url)
+    return f"{p.scheme}://{p.netloc}" if p.netloc else ""
+
+
+def _get_html_career_response(career_url: str) -> requests.Response:
+    """GET career page after warming session on site root (reduces 403 on some hosts)."""
+    origin = _origin(career_url)
+    extra = {**config.HEADERS, **_HTML_BROWSER_HEADERS}
+    if origin:
+        try:
+            _SESSION.get(
+                f"{origin}/",
+                timeout=config.REQUEST_TIMEOUT_SECONDS,
+                headers={**extra, "Referer": f"{origin}/"},
+            )
+        except requests.RequestException as exc:
+            logger.debug("Session warm-up %s/ failed: %s", origin, exc)
+    referer = f"{origin}/" if origin else career_url
+    return _SESSION.get(
+        career_url,
+        timeout=config.REQUEST_TIMEOUT_SECONDS,
+        headers={**extra, "Referer": referer},
+    )
+
 
 _OPENAI_CLIENT: OpenAI | None = None
 
@@ -76,7 +135,17 @@ def _fetch_detail_text(url: str, career_url: str) -> str:
     if not url or url.rstrip("/") == career_url.rstrip("/"):
         return ""
     try:
-        resp = _SESSION.get(url, timeout=config.REQUEST_TIMEOUT_SECONDS)
+        extra = {**config.HEADERS, **_HTML_BROWSER_HEADERS}
+        ref = (
+            career_url
+            if urlparse(url).netloc == urlparse(career_url).netloc
+            else f"{_origin(url)}/"
+        )
+        resp = _SESSION.get(
+            url,
+            timeout=config.REQUEST_TIMEOUT_SECONDS,
+            headers={**extra, "Referer": ref or url},
+        )
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "lxml")
         for tag in soup(["script", "style", "nav", "footer", "head", "header"]):
@@ -101,6 +170,9 @@ def fetch_jobs(company: dict) -> list[dict]:
     """
     source_type = company.get("source_type", "html")
     name = company.get("name", "Unknown")
+
+    if company.get("force_ipv4"):
+        _apply_ipv4_only_http(f"force_ipv4: {name}")
 
     try:
         if source_type == "personio":
@@ -262,7 +334,7 @@ def _fetch_html_llm(company: dict) -> list[dict]:
     """
     career_url = company["career_url"]
 
-    resp = _SESSION.get(career_url, timeout=config.REQUEST_TIMEOUT_SECONDS)
+    resp = _get_html_career_response(career_url)
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "lxml")

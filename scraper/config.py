@@ -81,6 +81,12 @@ JOB_BASE_URL = "https://www.pharmiweb.jobs/job/"
 REQUEST_DELAY_SECONDS = 0.5
 REQUEST_TIMEOUT_SECONDS = 30
 
+# Company checker: some hosts advertise broken IPv6 (connect timeout from VPS).
+# Set COMPANY_SCRAPER_FORCE_IPV4=1 in .env to force IPv4 for all watchlist HTTP.
+COMPANY_SCRAPER_FORCE_IPV4 = os.environ.get(
+    "COMPANY_SCRAPER_FORCE_IPV4", ""
+).lower() in ("1", "true", "yes")
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "

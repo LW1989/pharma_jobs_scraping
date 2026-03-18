@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from scraper.nrw_eligibility import (  # noqa: E402
+    is_excluded_nrw_major_entry_level_title,
     job_eligible_nrw_major,
     job_text_eligible,
     location_in_nrw,
@@ -14,6 +15,19 @@ from scraper.nrw_eligibility import (  # noqa: E402
     text_suggests_us_only_remote,
     ucb_detail_eligible,
 )
+
+
+def test_excluded_intern_praktikum_titles():
+    assert is_excluded_nrw_major_entry_level_title("Summer Internship (m/f/d)")
+    assert is_excluded_nrw_major_entry_level_title("Pharmaziepraktikant in Berlin")
+    assert is_excluded_nrw_major_entry_level_title("Praktikum im Bereich QA")
+    assert is_excluded_nrw_major_entry_level_title("Software Engineer Intern")
+    assert is_excluded_nrw_major_entry_level_title("Intern (m/w/d) Clinical Development")
+    assert not is_excluded_nrw_major_entry_level_title("Internal Audit Manager")
+    assert not is_excluded_nrw_major_entry_level_title("International Key Account Manager")
+    assert not is_excluded_nrw_major_entry_level_title("VP International Markets")
+    assert not is_excluded_nrw_major_entry_level_title("Internationale Projekte — Lead")
+    assert not is_excluded_nrw_major_entry_level_title("Senior Scientist Oncology")
 
 
 def test_location_in_nrw():

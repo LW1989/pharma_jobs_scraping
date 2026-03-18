@@ -74,7 +74,7 @@ Grouped by career page type to inform implementation:
 | Dolorgiet | Sankt Augustin | https://www.dolorgiet.de/karriere |
 | Eurocor | Bonn | https://eurocor.de/eurocor/jobs-career |
 | Wuxi Biologics | Wuppertal | https://www.wuxibiologics.com/proud/ |
-| Diagenics | Essen | https://diagenics.com |
+| Diagenics | Essen | https://diagenics.com/ (`force_ipv4` — IPv6 often times out from VPS) |
 | Evidenze | Köln | https://evidenze.com |
 | Arensia | Düsseldorf | https://www.arensia-em.com |
 

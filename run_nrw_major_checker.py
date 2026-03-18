@@ -16,6 +16,7 @@ import yaml
 
 from scraper import config
 from scraper.db import get_cursor, insert_job, mark_jobs_active
+from scraper.nrw_eligibility import is_excluded_nrw_major_entry_level_title
 from scraper.nrw_major_fetchers import fetch_jobs_for_employer
 
 logging.basicConfig(
@@ -86,14 +87,24 @@ def main() -> None:
             continue
 
         seen: set[str] = set()
+        skipped_entry = 0
         for job in raw:
+            title = job.get("title") or ""
+            if is_excluded_nrw_major_entry_level_title(title):
+                skipped_entry += 1
+                continue
             jid = job["job_id"]
             seen.add(jid)
             if jid not in db_ids:
                 insert_job(job)
-                logger.info("  + NEW  %s — %s", jid, job.get("title", "")[:60])
+                logger.info("  + NEW  %s — %s", jid, title[:60])
                 total_new += 1
                 db_ids.add(jid)
+        if skipped_entry:
+            logger.info(
+                "  skipped %d internship/praktikum (not stored)",
+                skipped_entry,
+            )
         if seen:
             mark_jobs_active(seen)
             total_seen += len(seen)

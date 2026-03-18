@@ -276,11 +276,13 @@ companies:
     career_url: https://www.mlm-labs.com/careers-at-mlm/
     source_type: html
 
+  # VPS connect timeouts often = broken IPv6; force IPv4 for this host.
   - name: Diagenics
     city: Essen
     country: Germany
-    career_url: https://diagenics.com
+    career_url: https://diagenics.com/
     source_type: html
+    force_ipv4: true
 
   - name: ClinStat
     city: Hürth

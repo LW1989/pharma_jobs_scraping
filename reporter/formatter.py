@@ -312,7 +312,13 @@ def build_telegram_text(
             title = escape(job.get("title") or "—")
             employer = escape(job.get("employer") or "—")
             url = job.get("url") or ""
-            lines.append(f"• <b>{title}</b> @ {employer}\n  🔗 {url}")
+            score = int(job.get("score") or 0)
+            label = "<b>APPLY</b>" if job.get("should_apply") else "review"
+            lines.append(
+                f"• <b>{title}</b> @ {employer}\n"
+                f"   ⭐ Score: {score}/100 · {label}\n"
+                f"   🔗 {url}"
+            )
     elif nrw_major_found:
         lines.append(
             f"\n\n🏭 <b>NRW major:</b> {nrw_major_found} job(s) below report filter."

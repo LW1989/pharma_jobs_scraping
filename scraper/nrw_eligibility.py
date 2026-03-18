@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -206,3 +207,28 @@ def listing_row_worth_detail_fetch(location_snippet: str) -> bool:
     if any(x in low for x in ("netherlands", "nederland", "belgium", "belgium", "luxembourg")):
         return True
     return False
+
+
+# Standalone "intern" (trainee), not a prefix of international / internal / …
+_INTERN_TRAINEE_RE = re.compile(
+    r"(?<![a-zäöüß])intern(?![a-zäöüß])",
+    re.IGNORECASE,
+)
+
+
+def is_excluded_nrw_major_entry_level_title(title: str) -> bool:
+    """
+    Internship / Praktikum roles — not inserted for company_nrw_major.
+
+    Uses title only (listing title from ATS). Matches:
+    - internship; praktikum / praktikant / praktika
+    - whole-word intern only (excludes international, internal, interne, …)
+    """
+    if not (title or "").strip():
+        return False
+    t = title.casefold()
+    if "internship" in t:
+        return True
+    if any(x in t for x in ("praktikum", "praktikant", "praktika")):
+        return True
+    return bool(_INTERN_TRAINEE_RE.search(title))

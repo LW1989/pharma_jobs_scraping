@@ -11,7 +11,8 @@ Research date: **March 2026**. Context: this project’s company watchlist alrea
 | `run_nrw_major_checker.py` | Daily fetch for `input_data/nrw_major_employers.yaml` |
 | `scraper/nrw_major_fetchers.py` | SmartRecruiters, **Bayer Eightfold API**, SuccessFactors, Workday, UCB, Henkel, J&J careers |
 | `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate |
-| `source = company_nrw_major` | DB rows; third section in email/Telegram reporter |
+| `source = company_nrw_major` | DB rows; third section in email/Telegram reporter (scores + APPLY/review) |
+| Title filter | **Internship / Praktikum / Praktikant** (and whole-word **intern**) are **not stored** — skipped in `run_nrw_major_checker` |
 
 LANXESS **career-jobboard.lanxess.com** is not in the default YAML (main site only). Add a second employer row if you need EMEA board jobs.
 
