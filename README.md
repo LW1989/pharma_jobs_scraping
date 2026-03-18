@@ -83,6 +83,21 @@ python run_scraper.py
 
 The first run will be slow (it fetches every job detail page, ~1 request/second). Subsequent runs only fetch new jobs.
 
+### Full pipeline (local smoke test)
+
+From repo root, after `.env` is set and Playwright browsers are installed (`playwright install chromium`):
+
+```bash
+# Dry-run reporter (no email/Telegram); limit evaluator for speed
+REPORTER_DRY_RUN=1 EVALUATOR_MAX_JOBS=20 ./scripts/run_full_pipeline_local.sh
+```
+
+Steps: `run_scraper` → `run_company_checker` → `run_nrw_major_checker` → `run_evaluator` → `run_reporter`.
+
+- **`REPORTER_DRY_RUN=1`** — builds the digest but skips SMTP/Telegram and marking jobs sent.
+- **`EVALUATOR_MAX_JOBS=N`** — optional; evaluates at most *N* pending jobs (omit for full backlog).
+- For a **real** digest send, unset `REPORTER_DRY_RUN` and ensure SMTP/Telegram in `.env`.
+
 ---
 
 ## Hetzner production deployment

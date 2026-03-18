@@ -227,9 +227,14 @@ companies with no new jobs are cheap (one HTTP request, no LLM call if nothing i
 0 6 * * *  cd ~/pharma_jobs_scraping \
            && .venv/bin/python run_scraper.py \
            && .venv/bin/python run_company_checker.py \
+           && .venv/bin/python run_nrw_major_checker.py \
            && .venv/bin/python run_evaluator.py \
            && .venv/bin/python run_reporter.py
 ```
+
+- **Pharmiweb scrape** uses Germany + Benelux only (`PHARMIWEB_LOCATION_IDS`, default `127,148,115`). Override in `.env` if needed.
+- **`run_nrw_major_checker.py`** loads `input_data/nrw_major_employers.yaml` (Miltenyi/SmartRecruiters, Bayer–Henkel/SuccessFactors, QIAGEN–J&J/Covestro/Workday, UCB). Jobs are filtered to **remote (DE/EU)** or **hybrid in NRW** via `input_data/nrw_eligibility.yaml`. Workday/UCB need `pip install playwright && playwright install chromium`.
+- **Reporter** (`requirements.yaml` → `reporting`): by default **pharmiweb** digest lists only `should_apply` rows; other evaluated pharmiweb jobs are marked sent in bulk. See `reporting` keys there.
 
 **Why daily is fine:**
 - Deduplication is by `job_id = MD5(company_name + job_title)`. Re-fetching a page

@@ -2,7 +2,7 @@
 
 ## What this project does
 
-This is a **daily job scraper** that collects all European pharma/life-science jobs from [pharmiweb.jobs](https://www.pharmiweb.jobs) and stores them in a PostgreSQL database. It is designed to grow into a personal job-application pipeline.
+This is a **daily job scraper** that collects pharma/life-science jobs from [pharmiweb.jobs](https://www.pharmiweb.jobs) (**Germany + Benelux** listings by default) and stores them in a PostgreSQL database. A separate **NRW major employer** pipeline adds filtered company jobs (`run_nrw_major_checker.py`). It is designed to grow into a personal job-application pipeline.
 
 ## Roadmap (in order of implementation)
 

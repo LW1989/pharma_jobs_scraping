@@ -18,10 +18,12 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
         (True,  "Passed pre-screening")          if all filters pass
         (False, "Pre-screened out: <reason>")    if any filter fails
     """
-    # company_direct jobs bypass structured-field filters (contract_type, hours,
-    # experience_level, location) because career pages don't provide those fields.
+    # company_direct / company_nrw_major bypass structured-field filters.
     # Only title-keyword filters (exclude_title_keywords, tier_3) still apply.
-    is_company_direct = job.get("source") == "company_direct"
+    is_company_direct = job.get("source") in (
+        "company_direct",
+        "company_nrw_major",
+    )
 
     # --- Contract type ---
     allowed_contract_types = filters.get("contract_types", [])
@@ -43,10 +45,9 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
             )
 
     # --- Location (two-path: remote needs country, on-site/hybrid needs city) ---
-    # company_direct jobs bypass location filtering — the user explicitly chose
-    # those companies and wants all their jobs evaluated regardless of city.
+    # company_direct / company_nrw_major bypass location filtering.
     location_cfg = filters.get("location", {})
-    if location_cfg and job.get("source") != "company_direct":
+    if location_cfg and not is_company_direct:
         remote_kws = location_cfg.get("remote_keywords", [])
         countries  = location_cfg.get("allowed_countries", [])
         cities     = location_cfg.get("allowed_cities", [])

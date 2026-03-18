@@ -1,18 +1,7 @@
 """
 Daily reporting entry point.
 
-Workflow:
-  1. Load requirements.yaml for reporting config.
-  2. Fetch top-N evaluated, unsent jobs from the DB (ordered by score).
-  3. Build and send an HTML email with the top 10 jobs (full details + AI reasoning).
-  4. Build and send a Telegram digest with the top 5 jobs (compact format).
-  5. Mark all fetched jobs as sent so they are never recommended again.
-
-Usage:
-    python run_reporter.py
-
-Run after run_evaluator.py in the daily cron chain:
-    run_scraper.py → run_evaluator.py → run_reporter.py
+After run_evaluator.py in the daily cron chain.
 """
 
 import logging
@@ -56,43 +45,90 @@ def main() -> None:
     requirements = _load_requirements()
     cfg = requirements.get("reporting", {})
 
-    top_email    = int(cfg.get("top_jobs_email", 10))
+    top_email = int(cfg.get("top_jobs_email", 10))
     top_telegram = int(cfg.get("top_jobs_telegram", 5))
-    min_score    = int(cfg.get("min_score_to_report", 0))
+    min_score = int(cfg.get("min_score_to_report", 0))
 
-    logger.info("Config:  email top-%d  |  telegram top-%d  |  min_score=%d",
-                top_email, top_telegram, min_score)
+    pharmi_apply_only = bool(cfg.get("pharmiweb_report_only_should_apply", True))
+    mark_pharmi_rest = bool(cfg.get("mark_unreported_pharmiweb_evaluated_as_sent", True))
 
-    # Step 1 — fetch unsent jobs from both sources
-    logger.info("Step 1 – Fetching unsent evaluated jobs …")
-    jobs = reporter.db.fetch_unsent_jobs(limit=top_email, min_score=min_score)
-    company_jobs = reporter.db.fetch_unsent_company_jobs(min_score=min_score)
-    company_jobs_found = reporter.db.count_unsent_company_jobs()
+    company_apply_only = bool(cfg.get("company_watchlist_report_only_should_apply", False))
+    company_max = cfg.get("company_watchlist_max_email")
+    company_limit = int(company_max) if company_max is not None else None
+
+    nrw_apply_only = bool(cfg.get("nrw_major_report_only_should_apply", True))
+    nrw_max = int(cfg.get("nrw_major_max_email", 10))
 
     logger.info(
-        "  pharmiweb: %d job(s)  |  company watchlist: %d job(s) shown "
-        "(%d found before threshold)",
-        len(jobs), len(company_jobs), company_jobs_found,
+        "Config: email top-%d | telegram top-%d | min_score=%d | "
+        "pharmiweb should_apply_only=%s",
+        top_email,
+        top_telegram,
+        min_score,
+        pharmi_apply_only,
     )
 
-    if not jobs and not company_jobs_found:
-        logger.info("No unsent evaluated jobs found. Nothing to report.")
+    logger.info("Step 1 – Fetching unsent jobs …")
+    jobs = reporter.db.fetch_unsent_jobs(
+        limit=top_email,
+        min_score=min_score,
+        only_should_apply=pharmi_apply_only,
+    )
+    company_jobs = reporter.db.fetch_unsent_company_jobs(
+        min_score=min_score,
+        only_should_apply=company_apply_only,
+        limit=company_limit,
+    )
+    company_jobs_found = reporter.db.count_unsent_company_jobs()
+
+    nrw_jobs = reporter.db.fetch_unsent_nrw_major_jobs(
+        min_score=min_score,
+        only_should_apply=nrw_apply_only,
+        limit=nrw_max,
+    )
+    nrw_total_unsent = reporter.db.count_unsent_nrw_major_all()
+
+    logger.info(
+        "  pharmiweb: %d | watchlist shown: %d (%d unsent prescreened) | "
+        "NRW major: %d (%d unsent prescreened)",
+        len(jobs),
+        len(company_jobs),
+        company_jobs_found,
+        len(nrw_jobs),
+        nrw_total_unsent,
+    )
+
+    has_content = jobs or company_jobs or nrw_jobs
+    has_notes = (company_jobs_found > len(company_jobs)) or (
+        nrw_total_unsent > len(nrw_jobs) and nrw_total_unsent > 0
+    )
+
+    if not has_content and not has_notes:
+        logger.info("No unsent evaluated jobs to report. Exiting.")
         logger.info("=" * 60)
         return
 
     for j in jobs:
-        flag = "APPLY" if j.get("should_apply") else "review"
-        logger.info("  [pharmiweb]  %3d/100  [%s]  %s @ %s",
-                    j.get("score", 0), flag,
-                    (j.get("title") or "")[:50], j.get("employer") or "")
+        logger.info(
+            "  [pharmiweb]  %3d/100  APPLY  %s",
+            int(j.get("score") or 0),
+            (j.get("title") or "")[:50],
+        )
     for j in company_jobs:
-        score_str = f"{int(j.get('score') or 0)}/100" if j.get("score") is not None else "unscored"
-        logger.info("  [watchlist]  %s  %s @ %s",
-                    score_str, (j.get("title") or "")[:50], j.get("employer") or "")
+        logger.info(
+            "  [watchlist]  %s  %s",
+            int(j.get("score") or 0),
+            (j.get("title") or "")[:45],
+        )
+    for j in nrw_jobs:
+        logger.info(
+            "  [nrw_major]  %s  %s",
+            int(j.get("score") or 0),
+            (j.get("title") or "")[:45],
+        )
 
-    # Step 2 — build and send email
     logger.info("-" * 60)
-    logger.info("Step 2 – Sending email report to %s …", config.REPORT_TO or "(not configured)")
+    logger.info("Step 2 – Email …")
     stats = reporter.db.count_evaluated_today()
     html_body = reporter.formatter.build_email_html(
         jobs,
@@ -100,46 +136,58 @@ def main() -> None:
         company_jobs=company_jobs or None,
         company_jobs_found=company_jobs_found,
         min_score=min_score,
+        nrw_major_jobs=nrw_jobs or None,
+        nrw_major_found=nrw_total_unsent if not nrw_jobs else 0,
     )
-    total_count = len(jobs) + len(company_jobs)
+    n_show = len(jobs) + len(company_jobs) + len(nrw_jobs)
     subject = (
-        f"Pharma Job Digest — {total_count} match{'es' if total_count != 1 else ''}"
+        f"Pharma Job Digest — {n_show} match{'es' if n_show != 1 else ''}"
         f" — {date.today().strftime('%-d %b %Y')}"
     )
+    if config.REPORTER_DRY_RUN:
+        logger.info(
+            "REPORTER_DRY_RUN=1 — skipping email, Telegram, and mark_as_sent "
+            "(set REPORTER_DRY_RUN=0 for real sends)."
+        )
+        logger.info("=" * 60)
+        logger.info("Dry run done. Would have reported %d job(s).", n_show)
+        logger.info("=" * 60)
+        return
+
     email_sent = False
     try:
         reporter.email_sender.send(subject=subject, html_body=html_body)
         email_sent = True
     except Exception as exc:
         logger.error("Email send failed: %s", exc)
-        logger.error("Jobs have NOT been marked as sent — they will be retried tomorrow.")
         sys.exit(1)
 
-    # Step 3 — build and send Telegram
     logger.info("-" * 60)
-    logger.info("Step 3 – Sending Telegram digest (top %d pharmiweb + watchlist) …", top_telegram)
+    logger.info("Step 3 – Telegram …")
     tg_text = reporter.formatter.build_telegram_text(
         jobs,
         top_n=top_telegram,
         company_jobs=company_jobs or None,
         company_jobs_found=company_jobs_found,
         min_score=min_score,
+        nrw_major_jobs=nrw_jobs or None,
+        nrw_major_found=nrw_total_unsent if not nrw_jobs else 0,
     )
     try:
         reporter.telegram_sender.send(tg_text)
     except Exception as exc:
-        logger.warning("Telegram send failed (email was delivered): %s", exc)
-        # Do not abort — email already delivered, still mark as sent
+        logger.warning("Telegram failed: %s", exc)
 
-    # Step 4 — mark both sources as sent
     logger.info("-" * 60)
-    all_ids = [j["job_id"] for j in jobs + company_jobs]
-    logger.info("Step 4 – Marking %d job(s) as sent …", len(all_ids))
+    all_ids = [j["job_id"] for j in jobs + company_jobs + nrw_jobs]
     reporter.db.mark_as_sent(all_ids)
+    if mark_pharmi_rest and email_sent:
+        n = reporter.db.mark_pharmiweb_evaluated_non_apply_as_sent()
+        if n:
+            logger.info("Marked %d other pharmiweb job(s) as sent (non-apply).", n)
 
     logger.info("=" * 60)
-    logger.info("Done. Reported %d pharmiweb + %d watchlist job(s). Email: %s | Telegram: attempted.",
-                len(jobs), len(company_jobs), "OK" if email_sent else "FAILED")
+    logger.info("Done. Reported %d job(s).", len(all_ids))
     logger.info("=" * 60)
 
 
