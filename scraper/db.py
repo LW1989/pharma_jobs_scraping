@@ -10,6 +10,32 @@ from scraper import config
 
 logger = logging.getLogger(__name__)
 
+# PostgreSQL text cannot contain NUL; scraped HTML/JSON sometimes includes \x00.
+_JOB_TEXT_KEYS = (
+    "job_id",
+    "url",
+    "title",
+    "employer",
+    "location",
+    "salary",
+    "start_date",
+    "closing_date",
+    "discipline",
+    "hours",
+    "contract_type",
+    "experience_level",
+    "job_details",
+    "source",
+)
+
+
+def _strip_nul_from_job_strings(job: dict) -> None:
+    for key in _JOB_TEXT_KEYS:
+        val = job.get(key)
+        if isinstance(val, str) and "\x00" in val:
+            job[key] = val.replace("\x00", "")
+
+
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS jobs (
     -- Core identity
@@ -119,6 +145,7 @@ def insert_job(job: dict) -> None:
     job.setdefault("first_seen", today)
     job.setdefault("last_seen", today)
     job.setdefault("source", "pharmiweb")
+    _strip_nul_from_job_strings(job)
     with get_cursor() as cur:
         cur.execute(sql, job)
     logger.debug("Inserted job %s: %s", job["job_id"], job.get("title"))

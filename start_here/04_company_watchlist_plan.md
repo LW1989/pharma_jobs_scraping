@@ -52,7 +52,7 @@ Grouped by career page type to inform implementation:
 | Seregen | Dortmund | https://serengen.com/career/ |
 | Resolve Bioscience | Monheim | https://resolvebiosciences.com/careers/ |
 | Protagene | Dortmund | https://careers.protagene.com/ |
-| Priavoid | Düsseldorf | https://priavoid.com/careers/ |
+| Priavoid | Düsseldorf | https://priavoid.com/contact/ (Careers section; announcements) |
 | Trans Immune | Düsseldorf | https://transimmune.com/career-opportunities/ |
 | YMC Europe | — | https://ymc.eu/recruitment.html |
 | Evoxx | Monheim | https://evoxx.com/people/jobs-and-career/ |

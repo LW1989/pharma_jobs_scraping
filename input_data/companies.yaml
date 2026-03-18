@@ -75,10 +75,11 @@ companies:
     career_url: http://www.autodisplay-biotech.com/html/job_opportunities.html
     source_type: html
 
+  # Careers block on contact page (jobs@priavoid.com); listings announced here when open.
   - name: Priavoid
     city: Düsseldorf
     country: Germany
-    career_url: https://priavoid.com/careers/
+    career_url: https://priavoid.com/contact/
     source_type: html
 
   - name: Trans Immune
