@@ -62,32 +62,47 @@ def _extract_job_links_from_soup(soup: BeautifulSoup) -> dict[str, str]:
     return jobs
 
 
+def _search_stem_for_location(location_id: int) -> str:
+    return (
+        "https://www.pharmiweb.jobs/searchjobs/"
+        f"?Keywords=&LocationId={location_id}&RadialLocation=100&CountryCode="
+    )
+
+
 def scrape_all_job_links() -> dict[str, str]:
     """
-    Iterate every search results page and return {job_id: url} for all jobs.
+    Merge job links from Germany + Benelux (config PHARMIWEB_LOCATION_IDS).
     """
-    logger.info("Fetching page 1 to determine total pages …")
-    page1_url = config.SEARCH_BASE_URL + "&Page=1"
-    resp = _get(page1_url)
-    soup = _soup(resp)
-
-    last_page = get_last_page(soup)
-    logger.info("Total pages: %d", last_page)
-
     all_jobs: dict[str, str] = {}
-    all_jobs.update(_extract_job_links_from_soup(soup))
-
-    for page in range(2, last_page + 1):
-        url = config.SEARCH_BASE_URL + f"&Page={page}"
-        logger.info("Scraping listing page %d / %d …", page, last_page)
+    for lid in config.PHARMIWEB_LOCATION_IDS:
+        stem = _search_stem_for_location(lid)
+        logger.info("Pharmiweb LocationId=%s — fetching page 1 …", lid)
+        page1_url = stem + "&Page=1"
         try:
-            resp = _get(url)
-            all_jobs.update(_extract_job_links_from_soup(_soup(resp)))
+            resp = _get(page1_url)
+            soup = _soup(resp)
         except Exception as exc:
-            logger.warning("Failed to fetch page %d: %s", page, exc)
-        time.sleep(config.REQUEST_DELAY_SECONDS)
+            logger.warning("LocationId=%s page 1 failed: %s", lid, exc)
+            continue
 
-    logger.info("Found %d unique job links across all pages.", len(all_jobs))
+        last_page = get_last_page(soup)
+        logger.info("  LocationId=%s: %d page(s)", lid, last_page)
+        all_jobs.update(_extract_job_links_from_soup(soup))
+
+        for page in range(2, last_page + 1):
+            url = stem + f"&Page={page}"
+            logger.info("  LocationId=%s — page %d / %d …", lid, page, last_page)
+            try:
+                resp = _get(url)
+                all_jobs.update(_extract_job_links_from_soup(_soup(resp)))
+            except Exception as exc:
+                logger.warning("Failed LocationId=%s page %d: %s", lid, page, exc)
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+
+    logger.info(
+        "Found %d unique job links (DE+Benelux merge).",
+        len(all_jobs),
+    )
     return all_jobs
 
 

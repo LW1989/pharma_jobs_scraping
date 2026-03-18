@@ -300,6 +300,21 @@ reporting:
   top_jobs_telegram: 3
 
   # Minimum score a job must have to be included in the report.
-  # 0 = always include the top-N regardless of score (recommended).
-  # Set to e.g. 50 to suppress very weak matches on quiet days.
   min_score_to_report: 50
+
+  # Pharmiweb: only email/Telegram jobs where the evaluator set should_apply.
+  pharmiweb_report_only_should_apply: true
+
+  # After sending, mark all other evaluated pharmiweb jobs (non-apply) as sent
+  # so they do not clog the unsent queue.
+  mark_unreported_pharmiweb_evaluated_as_sent: true
+
+  # Company watchlist: if true, same as pharmiweb (only should_apply in digest).
+  company_watchlist_report_only_should_apply: false
+
+  # Cap watchlist cards in email (null = no cap).
+  company_watchlist_max_email: 8
+
+  # NRW major employers section.
+  nrw_major_report_only_should_apply: true
+  nrw_major_max_email: 8

@@ -24,6 +24,13 @@ REPORT_TO     = os.environ.get("REPORT_TO", "")   # comma-separated recipients
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# Local pipeline test: skip email/Telegram/mark_sent (run_reporter.py)
+REPORTER_DRY_RUN = os.environ.get("REPORTER_DRY_RUN", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # Google Sheets API — required only for scripts/sync_companies_from_sheet.py
 GOOGLE_SHEET_ID         = os.environ.get("GOOGLE_SHEET_ID", "")
 GOOGLE_CREDENTIALS_FILE = os.environ.get(
@@ -49,9 +56,25 @@ OPENAI_PRICING: dict[str, dict[str, float]] = {
     "gpt-4o":                {"input": 2.50,  "output": 10.00},
 }
 
+# Pharmiweb: Germany (127), Netherlands (148), Belgium (115). Luxembourg rarely
+# has a dedicated facet; LU roles often appear under BE/NL. Override via env
+# PHARMIWEB_LOCATION_IDS=127,148,115
+def _pharmiweb_location_ids() -> list[int]:
+    raw = os.environ.get("PHARMIWEB_LOCATION_IDS", "127,148,115")
+    out: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            out.append(int(part))
+    return out or [127, 148, 115]
+
+
+PHARMIWEB_LOCATION_IDS = _pharmiweb_location_ids()
+
+# First ID used for backward-compat logging only
 SEARCH_BASE_URL = (
     "https://www.pharmiweb.jobs/searchjobs/"
-    "?Keywords=&LocationId=3&RadialLocation=100&LocationId=20752010&CountryCode="
+    f"?Keywords=&LocationId={PHARMIWEB_LOCATION_IDS[0]}&RadialLocation=100&CountryCode="
 )
 JOB_BASE_URL = "https://www.pharmiweb.jobs/job/"
 

@@ -14,6 +14,8 @@ Telegram design (from start_here/05_reporting_module_plan.md):
   - Footer: note that full report was sent by email
 """
 
+from __future__ import annotations
+
 from datetime import date as _date
 from html import escape
 
@@ -134,6 +136,8 @@ def build_email_html(
     company_jobs: list[dict] | None = None,
     company_jobs_found: int = 0,
     min_score: int = 0,
+    nrw_major_jobs: list[dict] | None = None,
+    nrw_major_found: int = 0,
 ) -> str:
     """Build the full HTML email body.
 
@@ -155,15 +159,19 @@ def build_email_html(
     if review_count:
         summary += f" &nbsp;·&nbsp; {review_count} worth reviewing"
     if company_jobs:
-        summary += f" &nbsp;·&nbsp; {len(company_jobs)} new from watchlist"
+        summary += f" &nbsp;·&nbsp; {len(company_jobs)} watchlist"
     elif company_jobs_found:
-        summary += f" &nbsp;·&nbsp; {company_jobs_found} watchlist job{'s' if company_jobs_found != 1 else ''} found (below threshold)"
+        summary += f" &nbsp;·&nbsp; {company_jobs_found} watchlist (below threshold)"
+    if nrw_major_jobs:
+        summary += f" &nbsp;·&nbsp; {len(nrw_major_jobs)} NRW major"
+    elif nrw_major_found:
+        summary += f" &nbsp;·&nbsp; {nrw_major_found} NRW major (below threshold)"
 
     # Section 1 — pharmiweb jobs
     pharmiweb_section = ""
     if jobs:
         pharmiweb_section = (
-            _section_header_html("Top Jobs from pharmiweb.jobs")
+            _section_header_html("Pharmiweb.jobs — apply recommended")
             + "".join(_job_card_html(j) for j in jobs)
         )
 
@@ -187,6 +195,22 @@ def build_email_html(
         )
         company_section = threshold_note
 
+    nrw_section = ""
+    if nrw_major_jobs:
+        nrw_section = (
+            _section_header_html("NRW major employers (remote / hybrid NRW)")
+            + "".join(_job_card_html(j) for j in nrw_major_jobs)
+        )
+    elif nrw_major_found:
+        nrw_section = (
+            f'<div style="margin:16px 24px;padding:14px 18px;background:#f9f9f9;'
+            f'border:1px solid #e0e0e0;border-radius:8px;font-size:13px;color:#616161;">'
+            f"<strong>NRW major employers</strong><br>"
+            f"{nrw_major_found} job(s) found but none met the report filter "
+            f"(score ≥{min_score} or should_apply)."
+            f"</div>"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -202,6 +226,7 @@ def build_email_html(
   </div>
   {pharmiweb_section}
   {company_section}
+  {nrw_section}
   <div class="footer">
     Evaluated {total} active jobs &nbsp;&middot;&nbsp; {today}
     &nbsp;&middot;&nbsp; PharmaJobScraper
@@ -221,6 +246,8 @@ def build_telegram_text(
     company_jobs: list[dict] | None = None,
     company_jobs_found: int = 0,
     min_score: int = 0,
+    nrw_major_jobs: list[dict] | None = None,
+    nrw_major_found: int = 0,
 ) -> str:
     """Build the compact Telegram HTML message.
 
@@ -275,6 +302,20 @@ def build_telegram_text(
             f"\n\n🏢 <b>Company watchlist:</b> {company_jobs_found} new job"
             f"{'s' if company_jobs_found != 1 else ''} found but none scored "
             f"{min_score}+/100."
+        )
+
+    if nrw_major_jobs:
+        lines.append(
+            f"\n\n🏭 <b>NRW major employers — {len(nrw_major_jobs)}:</b>"
+        )
+        for job in nrw_major_jobs[:8]:
+            title = escape(job.get("title") or "—")
+            employer = escape(job.get("employer") or "—")
+            url = job.get("url") or ""
+            lines.append(f"• <b>{title}</b> @ {employer}\n  🔗 {url}")
+    elif nrw_major_found:
+        lines.append(
+            f"\n\n🏭 <b>NRW major:</b> {nrw_major_found} job(s) below report filter."
         )
 
     return "\n".join(lines)

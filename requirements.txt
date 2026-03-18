@@ -8,3 +8,4 @@ pyyaml
 tenacity
 gspread
 google-auth
+playwright>=1.40.0

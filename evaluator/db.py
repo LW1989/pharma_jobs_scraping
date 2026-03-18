@@ -7,6 +7,7 @@ so run_evaluator.py stays thin.
 """
 
 import logging
+import os
 from datetime import datetime
 
 from scraper.db import get_cursor
@@ -21,7 +22,12 @@ def get_jobs_to_evaluate(cv_version: str) -> list[dict]:
       - cv_version differs from the current CV hash (CV was updated)
     Only active jobs are considered.
     """
-    sql = """
+    limit_raw = os.environ.get("EVALUATOR_MAX_JOBS", "").strip()
+    limit_sql = ""
+    params: list = [cv_version]
+    if limit_raw.isdigit() and int(limit_raw) > 0:
+        limit_sql = f" LIMIT {int(limit_raw)}"
+    sql = f"""
         SELECT
             job_id, title, employer, location, salary,
             start_date, closing_date, discipline, hours,
@@ -31,10 +37,18 @@ def get_jobs_to_evaluate(cv_version: str) -> list[dict]:
         WHERE job_active = TRUE
           AND (evaluated = FALSE OR cv_version IS DISTINCT FROM %s)
         ORDER BY job_id
+        {limit_sql}
     """
     with get_cursor() as cur:
-        cur.execute(sql, (cv_version,))
-        return [dict(row) for row in cur.fetchall()]
+        cur.execute(sql, tuple(params))
+        rows = [dict(row) for row in cur.fetchall()]
+    if limit_raw.isdigit() and int(limit_raw) > 0:
+        logger.info(
+            "EVALUATOR_MAX_JOBS=%s — evaluating at most %d job(s) this run.",
+            limit_raw,
+            int(limit_raw),
+        )
+    return rows
 
 
 def save_prescreening_fail(job_id: str, reason: str, cv_version: str) -> None:

@@ -1,0 +1,338 @@
+# NRW major-employer filter:
+#   (remote + DE/EU/EMEA) OR (hybrid + NRW) OR (on-site + office in NRW, Germany).
+# Substrings matched case-insensitively.
+
+nrw_location_keywords:
+  - Aachen
+  - Ahaus
+  - Ahlen
+  - Aldenhoven
+  - Alsdorf
+  - Arnsberg
+  - Attendorn
+  - Augustdorf
+  - Bad Berleburg
+  - Bad Driburg
+  - Bad Honnef
+  - Bad Laasphe
+  - Bad Lippspringe
+  - Bad Münstereifel
+  - Bad Oeynhausen
+  - Bad Salzuflen
+  - Baesweiler
+  - Balve
+  - Barntrup
+  - Beckum
+  - Bedburg
+  - Bergheim
+  - Bergisch Gladbach
+  - Bergkamen
+  - Bergneustadt
+  - Bestwig
+  - Beverungen
+  - Bielefeld
+  - Billerbeck
+  - Blankenheim
+  - Blomberg
+  - Bocholt
+  - Bochum
+  - Bonn
+  - Borchen
+  - Borgentreich
+  - Borgholzhausen
+  - Bornheim
+  - Bottrop
+  - Brakel
+  - Breckerfeld
+  - Brilon
+  - Brühl
+  - Büren
+  - Burscheid
+  - Castrop-Rauxel
+  - Coesfeld
+  - Cologne
+  - Datteln
+  - Delbrück
+  - Detmold
+  - Dinslaken
+  - Dormagen
+  - Dorsten
+  - Dortmund
+  - Drolshagen
+  - Duisburg
+  - Dülmen
+  - Düren
+  - Düsseldorf
+  - Elsdorf
+  - Emmerich
+  - Emsdetten
+  - Engelskirchen
+  - Ennepetal
+  - Ennigerloh
+  - Erftstadt
+  - Erkelenz
+  - Erkrath
+  - Eschweiler
+  - Espelkamp
+  - Essen
+  - Euskirchen
+  - Extertal
+  - Finnentrop
+  - Frechen
+  - Freudenberg
+  - Fröndenberg
+  - Geilenkirchen
+  - Geldern
+  - Gelsenkirchen
+  - Gescher
+  - Geseke
+  - Gevelsberg
+  - Gladbeck
+  - Goch
+  - Grefrath
+  - Greven
+  - Grevenbroich
+  - Gronau
+  - Gütersloh
+  - Hagen
+  - Haltern am See
+  - Halver
+  - Hamm
+  - Hamminkeln
+  - Harsewinkel
+  - Hattingen
+  - Heiligenhaus
+  - Heinsberg
+  - Hemer
+  - Hennef
+  - Herdecke
+  - Herford
+  - Herne
+  - Herscheid
+  - Hiddenhausen
+  - Hilchenbach
+  - Hilden
+  - Höxter
+  - Holzwickede
+  - Hörstel
+  - Hövelhof
+  - Hückelhoven
+  - Hürth
+  - Ibbenbüren
+  - Isselburg
+  - Jüchen
+  - Jülich
+  - Kaarst
+  - Kamen
+  - Kamp-Lintfort
+  - Kierspe
+  - Kirchlengern
+  - Kirchen
+  - Kleve
+  - Korschenbroich
+  - Königswinter
+  - Krefeld
+  - Kreuzau
+  - Kreuztal
+  - Köln
+  - Lage
+  - Langenfeld
+  - Leichlingen
+  - Lemgo
+  - Lennestadt
+  - Leverkusen
+  - Lippstadt
+  - Lohmar
+  - Löhne
+  - Lübbecke
+  - Lüdenscheid
+  - Lüdinghausen
+  - Lügde
+  - Lünen
+  - Marienheide
+  - Marl
+  - Marsberg
+  - Mechernich
+  - Meckenheim
+  - Medebach
+  - Meerbusch
+  - Mettmann
+  - Minden
+  - Moers
+  - Mönchengladbach
+  - Monheim
+  - Morsbach
+  - Much
+  - Mülheim
+  - Münster
+  - Netphen
+  - Nettetal
+  - Neukirchen-Vluyn
+  - Neunkirchen
+  - Neuss
+  - Nideggen
+  - Niederkassel
+  - Niederzier
+  - Nörvenich
+  - Nordkirchen
+  - Nottuln
+  - Nümbrecht
+  - Oberhausen
+  - Ochtrup
+  - Odenthal
+  - Oelde
+  - Oer-Erkenschwick
+  - Olfen
+  - Olpe
+  - Olsberg
+  - Overath
+  - Paderborn
+  - Petershagen
+  - Plettenberg
+  - Porta Westfalica
+  - Preußisch Oldendorf
+  - Pulheim
+  - Radevormwald
+  - Rahden
+  - Ratingen
+  - Recke
+  - Recklinghausen
+  - Reichshof
+  - Remscheid
+  - Rheda-Wiedenbrück
+  - Rheinbach
+  - Rheinberg
+  - Rheine
+  - Rietberg
+  - Rödinghausen
+  - Roetgen
+  - Rommerskirchen
+  - Rosendahl
+  - Rösrath
+  - Rüthen
+  - Salzkotten
+  - Sankt Augustin
+  - Schieder-Schwalenberg
+  - Schlangen
+  - Schleiden
+  - Schmallenberg
+  - Schwelm
+  - Schwerte
+  - Selm
+  - Sendenhorst
+  - Siegburg
+  - Siegen
+  - Simmerath
+  - Soest
+  - Solingen
+  - Sonsbeck
+  - Spenge
+  - Sprockhövel
+  - Stadtlohn
+  - Steinfurt
+  - Steinhagen
+  - Stemwede
+  - Stolberg
+  - Straelen
+  - Sundern
+  - Swisttal
+  - Tecklenburg
+  - Telgte
+  - Titz
+  - Troisdorf
+  - Übach-Palenberg
+  - Unna
+  - Velbert
+  - Velen
+  - Verl
+  - Versmold
+  - Viersen
+  - Vlotho
+  - Voerde
+  - Vreden
+  - Wachtberg
+  - Waldbröl
+  - Waltrop
+  - Warburg
+  - Warendorf
+  - Warstein
+  - Wegberg
+  - Welver
+  - Wenden
+  - Werl
+  - Wermelskirchen
+  - Werne
+  - Werther
+  - Wesel
+  - Wickede
+  - Wiehl
+  - Willich
+  - Wilnsdorf
+  - Winterberg
+  - Wipperfürth
+  - Witten
+  - Wülfrath
+  - Wuppertal
+  - Würselen
+  - Xanten
+  - Zülpich
+  - Nordrhein-Westfalen
+  - Nordrhein Westfalen
+  - NRW
+  - North Rhine-Westphalia
+  - Rheinland
+  - Ruhr
+  - Ruhrgebiet
+  - Rhein-Ruhr
+  - Köln/Bonn
+
+remote_region_hints:
+  - Germany
+  - Deutschland
+  - German
+  - Europe
+  - European
+  - EU
+  - EMEA
+  - DACH
+  - Benelux
+  - Netherlands
+  - Nederland
+  - Belgium
+  - Belgien
+  - Remote
+  - anywhere
+  - world-wide
+  - worldwide
+
+us_only_remote_signals:
+  - United States only
+  - US only
+  - U.S. only
+  - USA only
+  - 50 states
+  - must be located in the US
+  - must reside in the US
+  - US-based only
+
+hybrid_keywords:
+  - hybrid
+  - part-remote
+  - part remote
+  - mobile work
+  - Mobile Arbeit
+  - Home Office
+  - telearbeit
+  - Telearbeit
+  - mix of office
+
+remote_keywords:
+  - fully remote
+  - 100% remote
+  - remote-first
+  - work from home
+  - work-from-home
+  - home office
+  - telearbeit
+  - anywhere
+  - virtual position

@@ -1,0 +1,69 @@
+# NRW major employers. listing_nrw_scoped: listing URL already limits to NRW/office — all rows kept (except US-only).
+# Run: python run_nrw_major_checker.py (after scraper, before evaluator).
+# Henkel + Workday + UCB need: pip install playwright && playwright install chromium
+
+employers:
+  - name: Miltenyi Biotec
+    source_type: smartrecruiters
+    slug: MiltenyiBiotec1
+
+  # Same ~61 NRW roles as https://bayer.eightfold.ai/careers?query=&location=NW%2C%20Germany&hl=de (not jobs.bayer.com)
+  - name: Bayer
+    source_type: bayer_eightfold
+    eightfold_domain: bayer.com
+    eightfold_location: NW, Germany
+    eightfold_hl: de
+
+  # Matches manual count ~10 (NW, Germany) — see start_here/05_*.md
+  - name: LANXESS
+    source_type: successfactors
+    listing_nrw_scoped: true
+    listing_base_url: https://career.lanxess.com/search/?searchby=location&createNewAlert=false&q=&locationsearch=NW%2C+Germany&geolocation=&optionsFacetsDD_country=&optionsFacetsDD_department=&optionsFacetsDD_customfield3=
+    max_pages: 5
+    page_param: Page
+
+  # Matches manual count ~15 (NRW, Germany search) — not full global All-jobs list
+  - name: Grünenthal
+    source_type: successfactors
+    listing_nrw_scoped: true
+    listing_base_url: https://careers.grunenthal.com/search/?createNewAlert=false&p_kws=&locationsearch=NRW%2C+Germany&optionsFacetsDD_dept=&q=
+    max_pages: 10
+    page_param: Page
+
+  - name: Henkel
+    source_type: henkel_portal
+    careers_url: https://www.henkel.de/karriere/jobs-und-bewerbung
+    # ~121 postings on portal; max_jobs caps detail fetches after eligibility
+    max_jobs: 200
+    henkel_max_load_rounds: 70
+
+  # de-DE board aligns with ~21-job filtered view (see 05 verification); startDate in URL can expire
+  - name: QIAGEN
+    source_type: workday
+    listing_nrw_scoped: true
+    workday_url: https://qiagen.wd3.myworkdayjobs.com/de-DE/QIAGEN
+    workday_max_list_jobs: 50
+
+  # Location facet matches manual ~12 (Leverkusen area); unfiltered board lists more roles globally
+  - name: Covestro
+    source_type: workday
+    listing_nrw_scoped: true
+    workday_url: https://covestro.wd3.myworkdayjobs.com/de-DE/cov_external?locations=ff1397ebecb2016c13f9a0fe5c31b98d
+    workday_max_list_jobs: 50
+
+  # Filtered listing (Germany + NRW); paginated ?page=N. Direct Workday /JJ/ works too but careers URL matches your filters.
+  - name: Johnson & Johnson
+    source_type: jnj_careers
+    listing_nrw_scoped: true
+    listing_url: https://www.careers.jnj.com/en/jobs/?search=&country=Germany&state=North+Rhine-Westphalia&pagesize=20#results
+    jnj_max_listing_pages: 25
+    max_jobs: 100
+
+  - name: UCB
+    source_type: ucb
+    careers_url: https://careers.ucb.com/global/en/search-results
+    max_jobs: 80
+    ucb_site_keywords:
+      - Monheim am Rhein
+      - Monheim
+      - Mettmann
