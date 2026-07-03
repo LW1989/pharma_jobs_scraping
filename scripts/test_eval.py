@@ -114,6 +114,39 @@ if not all_tier3_ok:
     sys.exit(1)
 print("      Tier-3 exclusions: all checks passed", flush=True)
 
+# ── 3b. German entry-level / student title exclusions ─────────────────────────
+print("\n[3b/6] Verifying German entry-level title exclusions...", flush=True)
+entry_level_test_cases = [
+    {"job_id": "E1", "title": "Werkstudentin Labor (m/w/d)", "expect_pass": False},
+    {"job_id": "E2", "title": "Ausbildung zur BTA", "expect_pass": False},
+    {"job_id": "E3", "title": "Chemisch-technische Assistentin (CTA)", "expect_pass": False},
+    {"job_id": "E4", "title": "Praktikum Regulatory Affairs", "expect_pass": False},
+    {"job_id": "E5", "title": "International Clinical Project Manager", "expect_pass": True},
+    {"job_id": "E6", "title": "Clinical Trial Associate", "expect_pass": True},
+]
+all_entry_ok = True
+for job in entry_level_test_cases:
+    row = {
+        "job_id": job["job_id"],
+        "title": job["title"],
+        "contract_type": "Permanent",
+        "hours": "Full Time",
+        "location": "Germany, Homeworking",
+        "experience_level": "Experienced (non-manager)",
+    }
+    passed, reason = prescreen(row, filters)
+    expected_pass = job["expect_pass"]
+    status = "OK" if passed == expected_pass else "FAIL"
+    if status == "FAIL":
+        all_entry_ok = False
+    verdict = "PASS" if passed else "SKIP"
+    print(f"      [{status}] {verdict}: {job['title']}", flush=True)
+
+if not all_entry_ok:
+    print("\nERROR: Entry-level exclusion test failed — check exclude_title_keywords")
+    sys.exit(1)
+print("      Entry-level exclusions: all checks passed", flush=True)
+
 # ── 4. Find 5 real jobs that pass pre-screening ───────────────────────────────
 print("\n[4/6] Fetching 500 random active jobs, pre-screening for 5 passing...", flush=True)
 with get_cursor() as cur:

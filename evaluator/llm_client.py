@@ -26,6 +26,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from evaluator.preferences import format_tier_3_summary, format_tier_list
 from scraper import config
 
 logger = logging.getLogger(__name__)
@@ -215,14 +216,17 @@ def _build_preferences_block(
 
     tier_1 = preferences.get("tier_1_definitely", [])
     tier_2 = preferences.get("tier_2_would_work", [])
+    tier_3 = preferences.get("tier_3_exclude", [])
 
-    tier_1_text = "\n".join(f"  - {r}" for r in tier_1) or "  (none specified)"
-    tier_2_text = "\n".join(f"  - {r}" for r in tier_2) or "  (none specified)"
+    tier_1_text = format_tier_list(tier_1)
+    tier_2_text = format_tier_list(tier_2)
+    tier_3_text = format_tier_3_summary(tier_3)
 
     return f"""\
 ## Candidate Job Preferences
 
-The candidate has ranked the following role types by preference:
+The candidate has ranked the following role types by preference.
+Use the title hints to classify jobs by matching the job title and description.
 
 TIER 1 — Definitely wants (set should_apply = true if score >= {tier_1_threshold}):
 {tier_1_text}
@@ -231,15 +235,12 @@ TIER 2 — Would work in (set should_apply = true if score >= {tier_2_threshold}
 {tier_2_text}
 
 TIER 3 — Would NOT do (never recommend applying):
-  - Quality Assurance / Quality Operations
-  - Regulatory Affairs (any function)
-  - Medical Science Liaison (MSL)
-  - Commercial / Field Sales roles
+{tier_3_text}
   (Note: Tier 3 jobs are filtered before reaching the LLM. If this job appears
   to be a Tier 3 role that slipped through, set should_apply = false.)
 
 Step 1: Classify this job into TIER 1, TIER 2, or TIER 3 based on the role \
-type above.
+type and title hints above.
 Step 2: Set should_apply = true only if:
   - Classified as TIER 1 AND score >= {tier_1_threshold}, OR
   - Classified as TIER 2 AND score >= {tier_2_threshold}

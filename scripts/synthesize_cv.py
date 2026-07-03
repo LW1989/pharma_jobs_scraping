@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import yaml
 from openai import OpenAI
 
+from evaluator.preferences import format_tier_list
 from scraper import config
 
 logging.basicConfig(
@@ -93,14 +94,14 @@ def _is_up_to_date(current_hash: str) -> bool:
 
 def _build_prompt(
     cv_list: list[tuple[str, str]],
-    tier_1: list[str],
-    tier_2: list[str],
+    tier_1: list,
+    tier_2: list,
 ) -> str:
     cv_sections = "\n\n".join(
         f"## CV File: {name}\n{text}" for name, text in cv_list
     )
-    tier_1_text = "\n".join(f"  - {r}" for r in tier_1) or "  (none specified)"
-    tier_2_text = "\n".join(f"  - {r}" for r in tier_2) or "  (none specified)"
+    tier_1_text = format_tier_list(tier_1)
+    tier_2_text = format_tier_list(tier_2)
 
     return f"""\
 {cv_sections}
