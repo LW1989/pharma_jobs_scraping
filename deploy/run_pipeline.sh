@@ -29,6 +29,7 @@ $PYTHON scripts/sync_companies_from_sheet.py >> "$LOG_DIR/cron_$DATE.log" 2>&1 \
   || echo "[$(date)] WARNING: sync_companies_from_sheet.py failed (credentials not set up?), continuing with existing companies.yaml" >> "$LOG_DIR/cron_$DATE.log"
 
 $PYTHON run_company_checker.py  >> "$LOG_DIR/cron_$DATE.log" 2>&1
+$PYTHON run_nrw_major_checker.py >> "$LOG_DIR/cron_$DATE.log" 2>&1
 $PYTHON run_evaluator.py        >> "$LOG_DIR/cron_$DATE.log" 2>&1
 $PYTHON run_reporter.py         >> "$LOG_DIR/cron_$DATE.log" 2>&1
 

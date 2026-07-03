@@ -198,7 +198,7 @@ def build_email_html(
     nrw_section = ""
     if nrw_major_jobs:
         nrw_section = (
-            _section_header_html("NRW major employers (remote / hybrid NRW)")
+            _section_header_html("NRW major employers (remote / hybrid / on-site NRW)")
             + "".join(_job_card_html(j) for j in nrw_major_jobs)
         )
     elif nrw_major_found:

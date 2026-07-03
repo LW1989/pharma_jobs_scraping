@@ -1,5 +1,5 @@
 """
-Fetchers for NRW major employers (remote EU / hybrid NRW only).
+Fetchers for NRW major employers (remote DE/EU, hybrid NRW, on-site/in-office NRW).
 """
 
 from __future__ import annotations

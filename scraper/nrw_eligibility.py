@@ -1,6 +1,6 @@
 """
 Eligibility for NRW major-employer jobs:
-  Remote EU / hybrid+NRW / on-site with NRW location in listing+detail text.
+  Remote (DE/EU) OR hybrid+NRW OR on-site/in-office with NRW location in listing+detail text.
   listing_nrw_scoped (per employer): URL already filters to NRW/office scope — trust unless US-only.
 
 Config: input_data/nrw_eligibility.yaml
@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
+
+from scraper.title_exclusions import is_excluded_job_title
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,10 @@ def text_suggests_remote(text: str) -> bool:
     return _text_has_any(text, _lower_list("remote_keywords"))
 
 
+def text_suggests_onsite(text: str) -> bool:
+    return _text_has_any(text, _lower_list("onsite_keywords"))
+
+
 def job_text_eligible(location: str, detail_text: str) -> bool:
     """
     Used for HTML job pages (SuccessFactors, Workday text dump).
@@ -94,7 +99,7 @@ def job_text_eligible(location: str, detail_text: str) -> bool:
                 return False
         return True
 
-    # On-site (or detail only names NRW city): NRW keywords include German cities — no extra "Germany" required
+    # On-site / in-office: NRW city in location or detail is enough (no hybrid/remote keyword needed)
     if in_nrw:
         return True
 
@@ -175,15 +180,21 @@ def smartrecruiters_posting_eligible(posting: dict) -> bool:
     if text_suggests_remote(blob) and text_suggests_de_eu_emea(blob):
         return True
 
-    # On-site (not flagged hybrid/remote) but office in NRW, Germany — e.g. Miltenyi Köln / Bergisch Gladbach
-    country_l = (country or "").strip().lower()
-    germany = country_l in ("germany", "deutschland", "de") or _germany_in_location_string(
-        full_loc
-    )
-    if germany and (
+    # On-site / in-office (API flags hybrid/remote false) — e.g. Miltenyi Köln / Bergisch Gladbach
+    nrw_office = (
         location_in_nrw(full_loc) or location_in_nrw(city) or location_in_nrw(loc_blob)
-    ):
-        return True
+    )
+    if nrw_office:
+        country_l = (country or "").strip().lower()
+        germany = country_l in (
+            "germany",
+            "deutschland",
+            "de",
+            "deu",
+        ) or _germany_in_location_string(full_loc)
+        # Trust NRW city when country omitted; all NRW keywords are German cities
+        if germany or not country_l:
+            return True
 
     return False
 
@@ -202,6 +213,8 @@ def listing_row_worth_detail_fetch(location_snippet: str) -> bool:
         return True
     if any(x in low for x in ("remote", "homeworking", "hybrid", "home office")):
         return True
+    if text_suggests_onsite(location_snippet):
+        return True
     if "germany" in low or "deutschland" in low or ", de" in low:
         return True
     if any(x in low for x in ("netherlands", "nederland", "belgium", "belgium", "luxembourg")):
@@ -209,26 +222,18 @@ def listing_row_worth_detail_fetch(location_snippet: str) -> bool:
     return False
 
 
-# Standalone "intern" (trainee), not a prefix of international / internal / …
-_INTERN_TRAINEE_RE = re.compile(
-    r"(?<![a-zäöüß])intern(?![a-zäöüß])",
-    re.IGNORECASE,
-)
-
-
-def is_excluded_nrw_major_entry_level_title(title: str) -> bool:
+def is_excluded_nrw_major_entry_level_title(
+    title: str,
+    exclude_keywords: list[str] | None = None,
+) -> bool:
     """
-    Internship / Praktikum roles — not inserted for company_nrw_major.
+    Title excluded from company_nrw_major insert.
 
-    Uses title only (listing title from ATS). Matches:
-    - internship; praktikum / praktikant / praktika
-    - whole-word intern only (excludes international, internal, interne, …)
+    Delegates to shared title_exclusions (requirements.yaml keywords + intern rules).
     """
-    if not (title or "").strip():
-        return False
-    t = title.casefold()
-    if "internship" in t:
-        return True
-    if any(x in t for x in ("praktikum", "praktikant", "praktika")):
-        return True
-    return bool(_INTERN_TRAINEE_RE.search(title))
+    excluded, _ = is_excluded_job_title(
+        title,
+        exclude_keywords,
+        include_intern_rules=True,
+    )
+    return excluded

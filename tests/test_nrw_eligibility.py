@@ -10,6 +10,7 @@ from scraper.nrw_eligibility import (  # noqa: E402
     is_excluded_nrw_major_entry_level_title,
     job_eligible_nrw_major,
     job_text_eligible,
+    listing_row_worth_detail_fetch,
     location_in_nrw,
     smartrecruiters_posting_eligible,
     text_suggests_us_only_remote,
@@ -28,6 +29,19 @@ def test_excluded_intern_praktikum_titles():
     assert not is_excluded_nrw_major_entry_level_title("VP International Markets")
     assert not is_excluded_nrw_major_entry_level_title("Internationale Projekte — Lead")
     assert not is_excluded_nrw_major_entry_level_title("Senior Scientist Oncology")
+
+
+def test_excluded_german_keywords_when_configured():
+    keywords = ["Ausbildung", "Werkstudent", "BTA"]
+    assert is_excluded_nrw_major_entry_level_title(
+        "Ausbildung zum Industriekaufmann (m|w|d)", keywords
+    )
+    assert is_excluded_nrw_major_entry_level_title(
+        "Werkstudentin Labor", keywords
+    )
+    assert not is_excluded_nrw_major_entry_level_title(
+        "Functional head of quality control", keywords
+    )
 
 
 def test_location_in_nrw():
@@ -138,6 +152,33 @@ def test_listing_nrw_scoped_trusts_listing():
         "",
         "United States only. Remote.",
         listing_nrw_scoped=True,
+    )
+
+
+def test_smartrecruiters_onsite_koeln_no_country_field():
+    """SmartRecruiters sometimes omits country; NRW city alone should pass."""
+    posting = {
+        "name": "QA Manager",
+        "location": {
+            "city": "Köln",
+            "country": "",
+            "fullLocation": "Köln",
+            "remote": False,
+            "hybrid": False,
+        },
+        "jobAd": {},
+    }
+    assert smartrecruiters_posting_eligible(posting)
+
+
+def test_listing_row_onsite_keyword_prefetch():
+    assert listing_row_worth_detail_fetch("On-site · Full-time · Germany")
+
+
+def test_job_text_onsite_oberhausen():
+    assert job_text_eligible(
+        "Oberhausen, Germany",
+        "Vollzeit vor Ort in unserem Werk. Kein Homeoffice.",
     )
 
 

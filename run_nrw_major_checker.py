@@ -1,5 +1,5 @@
 """
-NRW major employers checker — jobs that are remote (DE/EU) or hybrid in NRW.
+NRW major employers checker — remote (DE/EU), hybrid in NRW, or on-site/in-office in NRW.
 
   python run_nrw_major_checker.py
 
@@ -16,7 +16,7 @@ import yaml
 
 from scraper import config
 from scraper.db import get_cursor, insert_job, mark_jobs_active
-from scraper.nrw_eligibility import is_excluded_nrw_major_entry_level_title
+from scraper.title_exclusions import is_excluded_job_title
 from scraper.nrw_major_fetchers import fetch_jobs_for_employer
 
 logging.basicConfig(
@@ -29,7 +29,16 @@ logger = logging.getLogger("run_nrw_major_checker")
 
 ROOT = Path(__file__).parent
 YAML_PATH = ROOT / "input_data" / "nrw_major_employers.yaml"
+REQUIREMENTS_PATH = ROOT / "requirements.yaml"
 INACTIVE_AFTER_DAYS = 30
+
+
+def _load_exclude_title_keywords() -> list[str]:
+    if not REQUIREMENTS_PATH.exists():
+        return []
+    with REQUIREMENTS_PATH.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return list((data.get("filters") or {}).get("exclude_title_keywords") or [])
 
 
 def _load_employers() -> list[dict]:
@@ -71,6 +80,7 @@ def main() -> None:
     logger.info("=" * 60)
 
     employers = _load_employers()
+    exclude_title_keywords = _load_exclude_title_keywords()
     db_ids = _db_ids_nrw_major()
     total_new = 0
     total_seen = 0
@@ -87,11 +97,16 @@ def main() -> None:
             continue
 
         seen: set[str] = set()
-        skipped_entry = 0
+        skipped_title = 0
         for job in raw:
             title = job.get("title") or ""
-            if is_excluded_nrw_major_entry_level_title(title):
-                skipped_entry += 1
+            excluded, _matched = is_excluded_job_title(
+                title,
+                exclude_title_keywords,
+                include_intern_rules=True,
+            )
+            if excluded:
+                skipped_title += 1
                 continue
             jid = job["job_id"]
             seen.add(jid)
@@ -100,10 +115,10 @@ def main() -> None:
                 logger.info("  + NEW  %s — %s", jid, title[:60])
                 total_new += 1
                 db_ids.add(jid)
-        if skipped_entry:
+        if skipped_title:
             logger.info(
-                "  skipped %d internship/praktikum (not stored)",
-                skipped_entry,
+                "  skipped %d excluded title(s) (requirements.yaml + intern rules)",
+                skipped_title,
             )
         if seen:
             mark_jobs_active(seen)

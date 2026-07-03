@@ -9,6 +9,8 @@ Public API:
         Returns (passed, reason_string).
 """
 
+from scraper.title_exclusions import is_excluded_job_title
+
 
 def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
     """
@@ -85,12 +87,14 @@ def prescreen(job: dict, filters: dict) -> tuple[bool, str]:
     # --- Excluded title keywords ---
     exclude_keywords = filters.get("exclude_title_keywords", [])
     if exclude_keywords:
-        title = (job.get("title") or "").lower()
-        for kw in exclude_keywords:
-            if kw.lower() in title:
-                return False, (
-                    f"Pre-screened out: title contains excluded keyword '{kw}'"
-                )
+        excluded, matched = is_excluded_job_title(
+            job.get("title") or "",
+            exclude_keywords,
+        )
+        if excluded:
+            return False, (
+                f"Pre-screened out: title contains excluded keyword '{matched}'"
+            )
 
     # --- Tier-3 preference exclusions ---
     # Reads tier_3_exclude from the job_preferences section of requirements.yaml.

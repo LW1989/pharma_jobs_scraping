@@ -1,5 +1,8 @@
-# NRW major-employer filter:
-#   (remote + DE/EU/EMEA) OR (hybrid + NRW) OR (on-site + office in NRW, Germany).
+# NRW major-employer filter (any of):
+#   1. Remote + DE/EU/EMEA (or Germany as work country)
+#   2. Hybrid + office in NRW
+#   3. On-site / in-office + office in NRW (no remote/hybrid keyword required)
+# listing_nrw_scoped employers: trust the NRW-filtered listing URL (all rows except US-only remote).
 # Substrings matched case-insensitively.
 
 nrw_location_keywords:
@@ -336,3 +339,20 @@ remote_keywords:
   - telearbeit
   - anywhere
   - virtual position
+
+# On-site / office-based (used for listing prefilter; NRW city in text still required at insert)
+onsite_keywords:
+  - on-site
+  - onsite
+  - on site
+  - vor ort
+  - am standort
+  - präsenz
+  - präsenzarbeit
+  - office-based
+  - office based
+  - in unserem büro
+  - in our office
+  - am arbeitsplatz
+  - keine homeoffice
+  - no remote work

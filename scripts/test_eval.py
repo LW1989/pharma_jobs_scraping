@@ -123,6 +123,8 @@ entry_level_test_cases = [
     {"job_id": "E4", "title": "Praktikum Regulatory Affairs", "expect_pass": False},
     {"job_id": "E5", "title": "International Clinical Project Manager", "expect_pass": True},
     {"job_id": "E6", "title": "Clinical Trial Associate", "expect_pass": True},
+    {"job_id": "E7", "title": "Functional head of quality control [§12 AMWHV] (m|f|d)", "expect_pass": True},
+    {"job_id": "E8", "title": "Head of Clinical Operations", "expect_pass": False},
 ]
 all_entry_ok = True
 for job in entry_level_test_cases:

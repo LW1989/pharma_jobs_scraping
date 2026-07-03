@@ -491,5 +491,5 @@ reporting:
   company_watchlist_max_email: 8
 
   # NRW major employers section.
-  nrw_major_report_only_should_apply: true
-  nrw_major_max_email: 8
+  nrw_major_report_only_should_apply: false
+  nrw_major_max_email: 10
