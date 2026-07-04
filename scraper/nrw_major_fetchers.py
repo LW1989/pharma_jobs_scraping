@@ -696,28 +696,10 @@ def _henkel_job_url(href: str) -> bool:
     return False
 
 
-def fetch_henkel_playwright(company: dict) -> list[dict]:
-    """
-    Henkel DE job portal (JS + often embedded SAP iframe).
-    https://www.henkel.de/karriere/jobs-und-bewerbung
-    """
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        logger.warning("playwright not installed — skip Henkel")
-        return []
+def _henkel_collect_listing_links(page, url: str, max_load_rounds: int) -> list[str]:
+    """Load Henkel DE portal, click 'Mehr Jobs laden', return job URLs from all frames."""
 
-    employer = company["name"]
-    url = company.get(
-        "careers_url",
-        "https://www.henkel.de/karriere/jobs-und-bewerbung",
-    )
-    # Portal lists ~121 jobs; fetch all links then filter by NRW/remote eligibility
-    max_jobs = int(company.get("max_jobs", 200))
-    max_load_rounds = int(company.get("henkel_max_load_rounds", 60))
-    jobs: list[dict] = []
-
-    def collect_links(page) -> list[str]:
+    def collect_links() -> list[str]:
         seen: set[str] = set()
         found: list[str] = []
         for frame in page.frames:
@@ -745,12 +727,47 @@ def fetch_henkel_playwright(company: dict) -> list[dict]:
                     found.append(full)
         return found
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+    for _ in range(max_load_rounds):
         try:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        except Exception:
+            pass
+        page.wait_for_timeout(600)
+        clicked = False
+        for loc in (
+            page.get_by_role("button", name=re.compile(r"Mehr Jobs laden", re.I)),
+            page.get_by_role("link", name=re.compile(r"Mehr Jobs laden", re.I)),
+            page.locator("text=Mehr Jobs laden"),
+            page.locator("text=Mehr laden"),
+        ):
+            try:
+                loc.first.click(timeout=5000)
+                page.wait_for_timeout(2400)
+                clicked = True
+                break
+            except Exception:
+                continue
+        if not clicked:
+            break
+    return collect_links()
+
+
+def probe_henkel_portal_link_count(
+    careers_url: str,
+    *,
+    max_load_rounds: int = 15,
+) -> tuple[str, int]:
+    """Smoke test: job URLs visible after load-more (no detail fetches)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "playwright not installed", -1
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
             page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
             page.set_default_timeout(90000)
-            page.goto(url, wait_until="networkidle")
+            page.goto(careers_url, wait_until="domcontentloaded")
             page.wait_for_timeout(5000)
             for sel in (
                 "button:has-text('Alle akzeptieren')",
@@ -763,34 +780,58 @@ def fetch_henkel_playwright(company: dict) -> list[dict]:
                     break
                 except Exception:
                     pass
-            # ~121 postings: paginate via "Mehr Jobs laden" until gone (SAP loads in batches)
-            for _ in range(max_load_rounds):
+            n = len(_henkel_collect_listing_links(page, careers_url, max_load_rounds))
+            browser.close()
+        return "ok", n
+    except Exception as exc:
+        return str(exc)[:120], -1
+
+
+def fetch_henkel_playwright(company: dict) -> list[dict]:
+    """
+    Henkel DE job portal (JS + often embedded SAP iframe).
+    https://www.henkel.de/karriere/jobs-und-bewerbung
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.warning("playwright not installed — skip Henkel")
+        return []
+
+    employer = company["name"]
+    url = company.get(
+        "careers_url",
+        "https://www.henkel.de/karriere/jobs-und-bewerbung",
+    )
+    # Portal lists ~121 jobs; fetch all links then filter by NRW/remote eligibility
+    max_jobs = int(company.get("max_jobs", 200))
+    max_load_rounds = int(company.get("henkel_max_load_rounds", 60))
+    jobs: list[dict] = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+            page.set_default_timeout(90000)
+            page.goto(url, wait_until="domcontentloaded")
+            page.wait_for_timeout(5000)
+            for sel in (
+                "button:has-text('Alle akzeptieren')",
+                "button:has-text('Accept all')",
+                "button:has-text('Zustimmen')",
+            ):
                 try:
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.locator(sel).first.click(timeout=3000)
+                    page.wait_for_timeout(2000)
+                    break
                 except Exception:
                     pass
-                page.wait_for_timeout(600)
-                clicked = False
-                for loc in (
-                    page.get_by_role("button", name=re.compile(r"Mehr Jobs laden", re.I)),
-                    page.get_by_role("link", name=re.compile(r"Mehr Jobs laden", re.I)),
-                    page.locator("text=Mehr Jobs laden"),
-                    page.locator("text=Mehr laden"),
-                ):
-                    try:
-                        loc.first.click(timeout=5000)
-                        page.wait_for_timeout(2400)
-                        clicked = True
-                        break
-                    except Exception:
-                        continue
-                if not clicked:
-                    break
-            links = collect_links(page)
+            links = _henkel_collect_listing_links(page, url, max_load_rounds)
             logger.info(
-                "Henkel portal: %d job URL(s) found (expect ~121 on site; fewer after NRW/remote filter)",
+                "Henkel portal: %d job URL(s) found (expect ~121 global; ~91 NRW after filter)",
                 len(links),
             )
+            eligible = 0
             for job_url in links[:max_jobs]:
                 try:
                     page.goto(job_url, wait_until="domcontentloaded", timeout=45000)
@@ -803,11 +844,16 @@ def fetch_henkel_playwright(company: dict) -> list[dict]:
                     "", body, listing_nrw_scoped=False
                 ):
                     continue
+                eligible += 1
                 try:
                     title = page.title() or ""
                 except Exception:
                     title = ""
                 jobs.append(_build_row(employer, title, job_url, "", body))
+            logger.info(
+                "Henkel portal: %d eligible job(s) after NRW/remote filter",
+                eligible,
+            )
             browser.close()
         except Exception as exc:
             logger.warning("Henkel portal: %s", exc)

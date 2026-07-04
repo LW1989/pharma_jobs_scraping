@@ -34,6 +34,7 @@ from scraper.nrw_major_fetchers import (  # noqa: E402
     JOB_PATH_RE,
     _workday_collect_listing_links,
     fetch_jobs_for_employer,
+    probe_henkel_portal_link_count,
     probe_jnj_careers_listing_link_count,
 )
 
@@ -175,14 +176,33 @@ def diagnose_jnj(row: dict, listing_only: bool) -> None:
     print(f"  full fetch: {len(jobs)} eligible job(s)")
 
 
-def diagnose_henkel(row: dict, sample: int) -> None:
-    """Henkel logs link count in fetcher; run capped smoke + full eligibility funnel."""
-    smoke = {**row, "max_jobs": sample, "henkel_max_load_rounds": 15}
+def diagnose_henkel(row: dict, listing_only: bool, sample: int) -> None:
+    name = row["name"]
+    url = row.get("careers_url", "https://www.henkel.de/karriere/jobs-und-bewerbung")
+    max_rounds = int(row.get("henkel_max_load_rounds", 70))
     print(f"\n{'='*72}")
-    print(f"{row['name']} [henkel_portal]  smoke max_jobs={sample}")
+    print(f"{name} [henkel_portal]  URL: {url}")
+    print(f"  load-more rounds: {max_rounds} (reference: ~121 global, ~91 NRW in browser)")
+
+    status, n_links = probe_henkel_portal_link_count(url, max_load_rounds=max_rounds)
+    if n_links < 0:
+        print(f"  listing probe FAILED: {status}")
+        return
+    print(f"  job URLs on portal after load-more: {n_links}")
+    if n_links == 0:
+        print("  → scraper found no job links (portal change, iframe, or cookie wall)")
+        return
+    if n_links < 50:
+        print("  ⚠ low link count — may need more load-more rounds or NRW filter in URL")
+
+    if listing_only:
+        return
+
+    smoke = {**row, "max_jobs": sample, "henkel_max_load_rounds": max_rounds}
     jobs = fetch_jobs_for_employer(smoke)
-    print(f"  eligible after smoke: {len(jobs)}")
-    print("  (check log line 'Henkel portal: N job URL(s) found' for raw link count)")
+    print(f"  eligible from first {sample} detail fetches: {len(jobs)}")
+    for j in jobs[:5]:
+        print(f"    ✓ {(j.get('title') or '')[:70]}")
 
 
 def diagnose_successfactors(row: dict) -> None:
@@ -243,7 +263,7 @@ def main() -> None:
         elif st == "jnj_careers":
             diagnose_jnj(row, args.listing_only)
         elif st == "henkel_portal":
-            diagnose_henkel(row, min(args.sample, 10))
+            diagnose_henkel(row, args.listing_only, min(args.sample, 15))
         elif st == "successfactors":
             diagnose_successfactors(row)
         else:
