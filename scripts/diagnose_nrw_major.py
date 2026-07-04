@@ -32,10 +32,13 @@ from scraper.nrw_eligibility import (  # noqa: E402
 )
 from scraper.nrw_major_fetchers import (  # noqa: E402
     JOB_PATH_RE,
-    _workday_collect_listing_links,
+    _ucb_apply_listing_filters,
+    _ucb_collect_job_links,
+    _workday_gather_listing_links,
     fetch_jobs_for_employer,
     probe_henkel_portal_link_count,
     probe_jnj_careers_listing_link_count,
+    probe_lanxess_portal_link_count,
 )
 
 YAML_PATH = ROOT / "input_data" / "nrw_major_employers.yaml"
@@ -68,7 +71,7 @@ def _eligibility_reason(location: str, text: str, *, scoped: bool) -> str:
 
 
 def _workday_listing_links(
-    start_url: str, max_list: int, max_pages: int, employer: str
+    company: dict, max_list: int, max_pages: int, employer: str
 ) -> tuple[list[str], str]:
     try:
         from playwright.sync_api import sync_playwright
@@ -79,38 +82,45 @@ def _workday_listing_links(
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
         page.set_default_timeout(60000)
-        page.goto(start_url, wait_until="domcontentloaded")
-        page.wait_for_timeout(4000)
-        try:
-            for btn in page.locator("button:has-text('Accept')").all()[:1]:
-                btn.click(timeout=3000)
-                page.wait_for_timeout(1000)
-        except Exception:
-            pass
-        links = _workday_collect_listing_links(
-            page,
-            start_url,
-            max_list=max_list,
-            max_pages=max_pages,
-            employer=employer,
-        )
+        links = _workday_gather_listing_links(page, company, employer)
         final_url = page.url
         browser.close()
     return links, final_url
+
+
+def _workday_link_breakdown(links: list[str]) -> dict[str, int]:
+    from collections import Counter
+
+    buckets: Counter[str] = Counter()
+    for u in links:
+        if "/job/" not in u:
+            buckets["other"] += 1
+            continue
+        city = u.split("/job/")[-1].split("/")[0]
+        buckets[city] += 1
+    return dict(buckets)
 
 
 def diagnose_workday(row: dict, listing_only: bool, sample: int) -> None:
     name = row["name"]
     url = row["workday_url"]
     scoped = bool(row.get("listing_nrw_scoped"))
-    max_list = int(row.get("workday_max_list_jobs", 60))
-    max_pages = int(row.get("workday_max_listing_pages", 10))
+    path_include = row.get("workday_path_include") or []
 
     print(f"\n{'='*72}")
     print(f"{name} [workday]  configured URL: {url}")
-    links, final_url = _workday_listing_links(url, max_list, max_pages, name)
+    if path_include:
+        print(f"  path filter: {path_include}")
+    links, final_url = _workday_listing_links(row, 0, 0, name)
     print(f"  listing resolved to: {final_url}")
-    print(f"  job links on listing (all pages): {len(links)}")
+    print(f"  job links after merge/path filter: {len(links)}")
+    if path_include and links:
+        breakdown = _workday_link_breakdown(links)
+        hilden = sum(v for k, v in breakdown.items() if "hilden" in k.lower())
+        remote_de = sum(
+            v for k, v in breakdown.items() if "remote" in k.lower() and "deutsch" in k.lower()
+        )
+        print(f"  breakdown: Hilden={hilden}, Remote_DE={remote_de}, buckets={breakdown}")
     if not links:
         print("  → 0 eligible in production = listing found nothing (not eligibility filter).")
         if "wd3." in url and "wd502" not in url:
@@ -179,21 +189,20 @@ def diagnose_jnj(row: dict, listing_only: bool) -> None:
 def diagnose_henkel(row: dict, listing_only: bool, sample: int) -> None:
     name = row["name"]
     url = row.get("careers_url", "https://www.henkel.de/karriere/jobs-und-bewerbung")
-    max_rounds = int(row.get("henkel_max_load_rounds", 70))
     print(f"\n{'='*72}")
     print(f"{name} [henkel_portal]  URL: {url}")
-    print(f"  load-more rounds: {max_rounds} (NRW hash pages × {row.get('henkel_load_count', 10)} jobs)")
+    print("  listing: Babiel JSON API (queryresults/asJson, startIndex pagination)")
 
     status, n_links = probe_henkel_portal_link_count(row)
     if n_links < 0:
         print(f"  listing probe FAILED: {status}")
         return
-    print(f"  job URLs on portal after load-more: {n_links}")
+    print(f"  job URLs from Babiel API: {n_links}")
     if n_links == 0:
-        print("  → scraper found no job links (portal change, iframe, or cookie wall)")
+        print("  → scraper found no job links (API change or collection id moved)")
         return
     if n_links < 50:
-        print("  ⚠ low link count — SAP portal may not have loaded; check cookies/iframe")
+        print("  ⚠ low link count — check henkel_ajax_url / collection id in yaml")
 
     if listing_only:
         return
@@ -237,7 +246,77 @@ def diagnose_successfactors(row: dict) -> None:
         print(f"  listing fetch FAILED: {exc}")
 
 
-def diagnose_api(row: dict) -> None:
+def diagnose_ucb(row: dict, listing_only: bool) -> None:
+    name = row["name"]
+    url = row.get("careers_url", "")
+    country = row.get("ucb_country_filter", "Germany")
+    city = row.get("ucb_city_filter", "Monheim")
+    print(f"\n{'='*72}")
+    print(f"{name} [ucb]  URL: {url}")
+    print(f"  facet filters: Country={country!r}, City={city!r}")
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  playwright not installed")
+        return
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+        page.goto(url, wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_timeout(4000)
+        _ucb_apply_listing_filters(page, row)
+        links = _ucb_collect_job_links(
+            page, max_pages=int(row.get("ucb_max_listing_pages", 10))
+        )
+        browser.close()
+
+    print(f"  job links after facet filters: {len(links)}")
+    if not links:
+        print("  → no links (facet UI change?)")
+        return
+
+    if listing_only:
+        return
+
+    jobs = fetch_jobs_for_employer(row)
+    print(f"  eligible jobs returned: {len(jobs)}")
+    for j in jobs[:5]:
+        print(f"    ✓ {(j.get('title') or '')[:70]}")
+
+
+def diagnose_lanxess(row: dict, listing_only: bool) -> None:
+    name = row["name"]
+    listing_url = row.get(
+        "listing_url", "https://career.lanxess.com/us/en/search-results"
+    )
+    loc = row.get("location_search", "Leverkusen")
+    print(f"\n{'='*72}")
+    print(f"{name} [lanxess_portal]  URL: {listing_url}")
+    print(f"  location search: {loc!r}")
+
+    status, n = probe_lanxess_portal_link_count(row)
+    if n < 0:
+        print(f"  listing probe FAILED: {status}")
+        return
+    print(f"  job links on portal: {n}")
+    if n == 0:
+        print("  → Phenom portal returned no job links (site change or search filter)")
+        return
+    if n < 5:
+        print("  ⚠ low link count — check listing_url / location_search")
+
+    if listing_only:
+        return
+
+    jobs = fetch_jobs_for_employer(row)
+    print(f"  eligible jobs returned: {len(jobs)}")
+    for j in jobs[:5]:
+        print(f"    ✓ {(j.get('title') or '')[:70]}")
+
+
+def diagnose_api_fallback(row: dict) -> None:
     name = row["name"]
     st = row["source_type"]
     print(f"\n{'='*72}")
@@ -266,8 +345,12 @@ def main() -> None:
             diagnose_henkel(row, args.listing_only, min(args.sample, 15))
         elif st == "successfactors":
             diagnose_successfactors(row)
+        elif st == "lanxess_portal":
+            diagnose_lanxess(row, args.listing_only)
+        elif st == "ucb":
+            diagnose_ucb(row, args.listing_only)
         else:
-            diagnose_api(row)
+            diagnose_api_fallback(row)
 
     print(f"\n{'='*72}")
     print("DB check (run on server):")

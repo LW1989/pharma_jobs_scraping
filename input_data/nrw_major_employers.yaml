@@ -1,6 +1,6 @@
 # NRW major employers. listing_nrw_scoped: listing URL already limits to NRW/office — all rows kept (except US-only).
 # Run: python run_nrw_major_checker.py (after scraper, before evaluator).
-# Henkel + Workday + UCB need: pip install playwright && playwright install chromium
+# Henkel uses Babiel JSON API (HTTP). Workday + UCB need: pip install playwright && playwright install chromium
 
 employers:
   - name: Miltenyi Biotec
@@ -14,13 +14,14 @@ employers:
     eightfold_location: NW, Germany
     eightfold_hl: de
 
-  # Matches manual count ~10 (NW, Germany) — see start_here/05_*.md
+  # Matches manual count ~10 (NW, Germany) — Phenom portal (not legacy SuccessFactors)
   - name: LANXESS
-    source_type: successfactors
+    source_type: lanxess_portal
+    listing_url: https://career.lanxess.com/us/en/search-results
+    location_search: Leverkusen
     listing_nrw_scoped: true
-    listing_base_url: https://career.lanxess.com/search/?searchby=location&createNewAlert=false&q=&locationsearch=NW%2C+Germany&geolocation=&optionsFacetsDD_country=&optionsFacetsDD_department=&optionsFacetsDD_customfield3=
-    max_pages: 5
-    page_param: Page
+    max_jobs: 30
+    lanxess_max_listing_pages: 5
 
   # Matches manual count ~15 (NRW, Germany search) — not full global All-jobs list
   - name: Grünenthal
@@ -33,19 +34,20 @@ employers:
   - name: Henkel
     source_type: henkel_portal
     careers_url: https://www.henkel.de/karriere/jobs-und-bewerbung
-    henkel_nrw_listing: true
-    henkel_load_count: 10
-    listing_nrw_scoped: true
+    # Babiel JSON API lists Germany-wide (~120); NRW filter applied in eligibility pass
+    listing_nrw_scoped: false
     max_jobs: 200
-    henkel_max_load_rounds: 15
 
-  # de-DE board aligns with ~21-job filtered view (see 05 verification); startDate in URL can expire
+  # Hilden on-site + Remote_Deutschland; path filter on full board (no stable locations= facet on wd502)
   - name: QIAGEN
     source_type: workday
     listing_nrw_scoped: true
     workday_url: https://qiagen.wd502.myworkdayjobs.com/de-DE/QIAGEN
-    workday_max_list_jobs: 50
-    workday_max_listing_pages: 5
+    workday_max_list_jobs: 120
+    workday_max_listing_pages: 10
+    workday_path_include:
+      - /job/Hilden/
+      - /job/Remote_Deutschland/
 
   # Location facet matches manual ~12 (Leverkusen area); unfiltered board lists more roles globally
   - name: Covestro
@@ -66,7 +68,10 @@ employers:
   - name: UCB
     source_type: ucb
     careers_url: https://careers.ucb.com/global/en/search-results
+    ucb_country_filter: Germany
+    ucb_city_filter: Monheim
     max_jobs: 80
+    ucb_max_listing_pages: 5
     ucb_site_keywords:
       - Monheim am Rhein
       - Monheim
