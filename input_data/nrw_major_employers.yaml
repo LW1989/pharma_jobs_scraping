@@ -41,7 +41,7 @@ employers:
   - name: QIAGEN
     source_type: workday
     listing_nrw_scoped: true
-    workday_url: https://qiagen.wd3.myworkdayjobs.com/de-DE/QIAGEN
+    workday_url: https://qiagen.wd502.myworkdayjobs.com/de-DE/QIAGEN
     workday_max_list_jobs: 50
 
   # Location facet matches manual ~12 (Leverkusen area); unfiltered board lists more roles globally

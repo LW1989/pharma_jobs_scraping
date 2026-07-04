@@ -324,6 +324,12 @@ def fetch_workday_playwright(company: dict) -> list[dict]:
                 if full not in links:
                     links.append(full)
             links = links[:max_list]
+            logger.info(
+                "%s workday: %d job link(s) on listing (max_list=%d)",
+                employer,
+                len(links),
+                max_list,
+            )
             for job_url in links:
                 try:
                     page.goto(job_url, wait_until="domcontentloaded")
@@ -342,6 +348,7 @@ def fetch_workday_playwright(company: dict) -> list[dict]:
                 ):
                     continue
                 jobs.append(_build_row(employer, title, job_url, "", body))
+            logger.info("%s workday: %d eligible job(s) after filter", employer, len(jobs))
             browser.close()
         except Exception as exc:
             logger.warning("Workday %s: %s", employer, exc)
