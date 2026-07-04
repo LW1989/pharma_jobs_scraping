@@ -696,91 +696,174 @@ def _henkel_job_url(href: str) -> bool:
     return False
 
 
-def _henkel_collect_listing_links(page, url: str, max_load_rounds: int) -> list[str]:
-    """Load Henkel DE portal, click 'Mehr Jobs laden', return job URLs from all frames."""
+HENKEL_NRW_HASH = (
+    "selectFilterByParameter=Locations_279384=Europe"
+    "&Europe_877522=Germany"
+    "&Germany_279422=North%20Rhine%20Westphalia"
+)
 
-    def collect_links() -> list[str]:
-        seen: set[str] = set()
-        found: list[str] = []
-        for frame in page.frames:
+
+def _henkel_listing_url(
+    base: str, start_index: int, load_count: int, *, nrw: bool
+) -> str:
+    stem = base.split("#")[0].rstrip("/")
+    if nrw:
+        frag = f"{HENKEL_NRW_HASH}&startIndex={start_index}&loadCount={load_count}&"
+    else:
+        frag = f"startIndex={start_index}&loadCount={load_count}&"
+    return f"{stem}#{frag}"
+
+
+def _henkel_normalize_href(href: str, base_url: str) -> str | None:
+    if not _henkel_job_url(href):
+        return None
+    if href.startswith("#"):
+        return (base_url.split("#")[0].rstrip("/") + href).split("?")[0]
+    if href.startswith("/"):
+        return urljoin("https://www.henkel.de", href.split("#")[0])
+    if href.startswith("http"):
+        return href.split("#")[0]
+    return urljoin(base_url.split("#")[0], href.split("#")[0])
+
+
+def _henkel_extract_links_from_frames(page, base_url: str) -> list[str]:
+    seen: set[str] = set()
+    found: list[str] = []
+    for frame in page.frames:
+        try:
+            hrefs = frame.evaluate(
+                """() => [...document.querySelectorAll('a[href]')]
+                    .map(a => a.getAttribute('href'))
+                    .filter(Boolean)"""
+            )
+        except Exception:
+            continue
+        for h in hrefs:
+            full = _henkel_normalize_href(h, base_url)
+            if full and full.startswith("http") and full not in seen:
+                seen.add(full)
+                found.append(full)
+    return found
+
+
+def _henkel_dismiss_cookies(page) -> None:
+    for sel in (
+        "button:has-text('Alle akzeptieren')",
+        "button:has-text('Accept all')",
+        "button:has-text('Zustimmen')",
+    ):
+        try:
+            page.locator(sel).first.click(timeout=3000)
+            page.wait_for_timeout(1500)
+            return
+        except Exception:
+            continue
+
+
+def _henkel_click_load_more_in_frames(page) -> bool:
+    clicked = False
+    for frame in page.frames:
+        for pattern in (
+            r"Mehr Jobs laden",
+            r"Mehr laden",
+            r"Load more",
+        ):
             try:
-                hrefs = frame.evaluate(
-                    """() => [...document.querySelectorAll('a[href]')]
-                        .map(a => a.getAttribute('href'))
-                        .filter(Boolean)"""
-                )
+                btn = frame.get_by_role("button", name=re.compile(pattern, re.I))
+                if btn.count() and btn.first.is_enabled():
+                    btn.first.click(timeout=3000)
+                    page.wait_for_timeout(2000)
+                    clicked = True
             except Exception:
                 continue
-            for h in hrefs:
-                if not _henkel_job_url(h):
-                    continue
-                if h.startswith("#"):
-                    full = (url.split("#")[0].rstrip("/") + h).split("?")[0]
-                elif h.startswith("/"):
-                    full = urljoin("https://www.henkel.de", h.split("#")[0])
-                elif h.startswith("http"):
-                    full = h.split("#")[0]
-                else:
-                    full = urljoin(url, h.split("#")[0])
-                if full.startswith("http") and full not in seen:
-                    seen.add(full)
-                    found.append(full)
-        return found
+    if not clicked:
+        for loc in (
+            page.get_by_role("button", name=re.compile(r"Mehr Jobs laden", re.I)),
+            page.locator("text=Mehr Jobs laden"),
+        ):
+            try:
+                loc.first.click(timeout=3000)
+                page.wait_for_timeout(2000)
+                return True
+            except Exception:
+                continue
+    return clicked
 
-    for _ in range(max_load_rounds):
+
+def _henkel_collect_listing_links(page, company: dict) -> list[str]:
+    """
+    Henkel SAP portal: NRW filter uses hash startIndex/loadCount pagination (~91 jobs).
+    Unfiltered portal uses 'Mehr Jobs laden' clicks (~121 jobs).
+    """
+    base = company.get(
+        "careers_url",
+        "https://www.henkel.de/karriere/jobs-und-bewerbung",
+    )
+    employer = company.get("name", "Henkel")
+    use_nrw = bool(company.get("henkel_nrw_listing", True))
+    load_count = int(company.get("henkel_load_count", 10))
+    max_rounds = int(company.get("henkel_max_load_rounds", 15))
+
+    if use_nrw:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        start = 0
+        for _ in range(max_rounds):
+            listing_url = _henkel_listing_url(base, start, load_count, nrw=True)
+            page.goto(listing_url, wait_until="domcontentloaded")
+            page.wait_for_timeout(3500)
+            _henkel_click_load_more_in_frames(page)
+            batch = _henkel_extract_links_from_frames(page, base)
+            new = [u for u in batch if u not in seen]
+            for u in new:
+                seen.add(u)
+                ordered.append(u)
+            logger.info(
+                "%s startIndex=%d: %d on page, +%d new (total %d)",
+                employer,
+                start,
+                len(batch),
+                len(new),
+                len(ordered),
+            )
+            if not new or len(new) < load_count:
+                break
+            start += load_count
+        return ordered
+
+    # Legacy: unfiltered portal + Mehr Jobs laden
+    page.goto(base.split("#")[0], wait_until="domcontentloaded")
+    page.wait_for_timeout(4000)
+    for _ in range(max_rounds):
         try:
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         except Exception:
             pass
         page.wait_for_timeout(600)
-        clicked = False
-        for loc in (
-            page.get_by_role("button", name=re.compile(r"Mehr Jobs laden", re.I)),
-            page.get_by_role("link", name=re.compile(r"Mehr Jobs laden", re.I)),
-            page.locator("text=Mehr Jobs laden"),
-            page.locator("text=Mehr laden"),
-        ):
-            try:
-                loc.first.click(timeout=5000)
-                page.wait_for_timeout(2400)
-                clicked = True
-                break
-            except Exception:
-                continue
-        if not clicked:
+        if not _henkel_click_load_more_in_frames(page):
             break
-    return collect_links()
+    return _henkel_extract_links_from_frames(page, base)
 
 
-def probe_henkel_portal_link_count(
-    careers_url: str,
-    *,
-    max_load_rounds: int = 15,
-) -> tuple[str, int]:
-    """Smoke test: job URLs visible after load-more (no detail fetches)."""
+def probe_henkel_portal_link_count(company: dict) -> tuple[str, int]:
+    """Smoke test: job URLs visible after NRW hash pagination or load-more."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return "playwright not installed", -1
+    careers_url = company.get(
+        "careers_url",
+        "https://www.henkel.de/karriere/jobs-und-bewerbung",
+    )
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
             page.set_default_timeout(90000)
-            page.goto(careers_url, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
-            for sel in (
-                "button:has-text('Alle akzeptieren')",
-                "button:has-text('Accept all')",
-                "button:has-text('Zustimmen')",
-            ):
-                try:
-                    page.locator(sel).first.click(timeout=3000)
-                    page.wait_for_timeout(2000)
-                    break
-                except Exception:
-                    pass
-            n = len(_henkel_collect_listing_links(page, careers_url, max_load_rounds))
+            page.goto(careers_url.split("#")[0], wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
+            _henkel_dismiss_cookies(page)
+            n = len(_henkel_collect_listing_links(page, company))
             browser.close()
         return "ok", n
     except Exception as exc:
@@ -805,7 +888,7 @@ def fetch_henkel_playwright(company: dict) -> list[dict]:
     )
     # Portal lists ~121 jobs; fetch all links then filter by NRW/remote eligibility
     max_jobs = int(company.get("max_jobs", 200))
-    max_load_rounds = int(company.get("henkel_max_load_rounds", 60))
+    scoped = bool(company.get("listing_nrw_scoped", False))
     jobs: list[dict] = []
 
     with sync_playwright() as p:
@@ -813,22 +896,12 @@ def fetch_henkel_playwright(company: dict) -> list[dict]:
         try:
             page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
             page.set_default_timeout(90000)
-            page.goto(url, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000)
-            for sel in (
-                "button:has-text('Alle akzeptieren')",
-                "button:has-text('Accept all')",
-                "button:has-text('Zustimmen')",
-            ):
-                try:
-                    page.locator(sel).first.click(timeout=3000)
-                    page.wait_for_timeout(2000)
-                    break
-                except Exception:
-                    pass
-            links = _henkel_collect_listing_links(page, url, max_load_rounds)
+            page.goto(url.split("#")[0], wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
+            _henkel_dismiss_cookies(page)
+            links = _henkel_collect_listing_links(page, company)
             logger.info(
-                "Henkel portal: %d job URL(s) found (expect ~121 global; ~91 NRW after filter)",
+                "Henkel portal: %d job URL(s) found (NRW listing ~91; global ~121)",
                 len(links),
             )
             eligible = 0
@@ -841,7 +914,7 @@ def fetch_henkel_playwright(company: dict) -> list[dict]:
                     logger.debug("Henkel job %s: %s", job_url, exc)
                     continue
                 if not job_eligible_nrw_major(
-                    "", body, listing_nrw_scoped=False
+                    "", body, listing_nrw_scoped=scoped
                 ):
                     continue
                 eligible += 1

@@ -182,9 +182,9 @@ def diagnose_henkel(row: dict, listing_only: bool, sample: int) -> None:
     max_rounds = int(row.get("henkel_max_load_rounds", 70))
     print(f"\n{'='*72}")
     print(f"{name} [henkel_portal]  URL: {url}")
-    print(f"  load-more rounds: {max_rounds} (reference: ~121 global, ~91 NRW in browser)")
+    print(f"  load-more rounds: {max_rounds} (NRW hash pages × {row.get('henkel_load_count', 10)} jobs)")
 
-    status, n_links = probe_henkel_portal_link_count(url, max_load_rounds=max_rounds)
+    status, n_links = probe_henkel_portal_link_count(row)
     if n_links < 0:
         print(f"  listing probe FAILED: {status}")
         return
@@ -193,12 +193,12 @@ def diagnose_henkel(row: dict, listing_only: bool, sample: int) -> None:
         print("  → scraper found no job links (portal change, iframe, or cookie wall)")
         return
     if n_links < 50:
-        print("  ⚠ low link count — may need more load-more rounds or NRW filter in URL")
+        print("  ⚠ low link count — SAP portal may not have loaded; check cookies/iframe")
 
     if listing_only:
         return
 
-    smoke = {**row, "max_jobs": sample, "henkel_max_load_rounds": max_rounds}
+    smoke = {**row, "max_jobs": sample}
     jobs = fetch_jobs_for_employer(smoke)
     print(f"  eligible from first {sample} detail fetches: {len(jobs)}")
     for j in jobs[:5]:

@@ -33,9 +33,11 @@ employers:
   - name: Henkel
     source_type: henkel_portal
     careers_url: https://www.henkel.de/karriere/jobs-und-bewerbung
-    # ~121 postings on portal; max_jobs caps detail fetches after eligibility
+    henkel_nrw_listing: true
+    henkel_load_count: 10
+    listing_nrw_scoped: true
     max_jobs: 200
-    henkel_max_load_rounds: 70
+    henkel_max_load_rounds: 15
 
   # de-DE board aligns with ~21-job filtered view (see 05 verification); startDate in URL can expire
   - name: QIAGEN
