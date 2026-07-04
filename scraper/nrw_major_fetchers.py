@@ -284,6 +284,96 @@ def fetch_successfactors_listing(company: dict) -> list[dict]:
     return jobs
 
 
+def _workday_extract_job_links(html: str, base_url: str) -> list[str]:
+    """Unique job detail URLs from one Workday listing page."""
+    links: list[str] = []
+    for a in BeautifulSoup(html, "lxml").find_all("a", href=True):
+        h = a["href"]
+        if "/job/" not in h:
+            continue
+        if "myworkdayjobs.com" not in h and not h.startswith("/"):
+            continue
+        full = urljoin(base_url, h.split("?")[0])
+        if full not in links:
+            links.append(full)
+    return links
+
+
+_WORKDAY_NEXT_SELECTORS = (
+    'button[aria-label*="next" i]',
+    'button[aria-label*="weiter" i]',
+    '[data-uxi-widget-type="paginationNextButton"]',
+)
+
+
+def _workday_next_clickable(page) -> bool:
+    for sel in _WORKDAY_NEXT_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() == 0:
+                continue
+            if loc.is_disabled():
+                return False
+            if (loc.get_attribute("aria-disabled") or "").lower() == "true":
+                return False
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _workday_click_next(page) -> bool:
+    if not _workday_next_clickable(page):
+        return False
+    for sel in _WORKDAY_NEXT_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() == 0:
+                continue
+            loc.click(timeout=5000)
+            page.wait_for_timeout(2500)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _workday_collect_listing_links(
+    page,
+    start_url: str,
+    *,
+    max_list: int,
+    max_pages: int,
+    employer: str,
+) -> list[str]:
+    """Paginate Workday listing (20 jobs/page) until no next or caps hit."""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for pg in range(1, max_pages + 1):
+        batch = _workday_extract_job_links(page.content(), start_url)
+        new = [u for u in batch if u not in seen]
+        for u in new:
+            seen.add(u)
+            ordered.append(u)
+        logger.info(
+            "%s workday page %d: %d link(s) on page, +%d new (total %d)",
+            employer,
+            pg,
+            len(batch),
+            len(new),
+            len(ordered),
+        )
+        if len(ordered) >= max_list:
+            return ordered[:max_list]
+        if pg >= max_pages:
+            break
+        if not new and pg > 1:
+            break
+        if not _workday_click_next(page):
+            break
+    return ordered[:max_list]
+
+
 def fetch_workday_playwright(company: dict) -> list[dict]:
     try:
         from playwright.sync_api import sync_playwright
@@ -294,6 +384,7 @@ def fetch_workday_playwright(company: dict) -> list[dict]:
     employer = company["name"]
     start_url = company["workday_url"]
     max_list = int(company.get("workday_max_list_jobs", 60))
+    max_pages = int(company.get("workday_max_listing_pages", 10))
     scoped = bool(company.get("listing_nrw_scoped"))
     jobs: list[dict] = []
 
@@ -302,33 +393,27 @@ def fetch_workday_playwright(company: dict) -> list[dict]:
         try:
             page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
             page.set_default_timeout(45000)
-            page.goto(start_url, wait_until="networkidle")
-            page.wait_for_timeout(3000)
+            page.goto(start_url, wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
             try:
                 for btn in page.locator("button:has-text('Accept')").all()[:1]:
                     btn.click(timeout=3000)
                     page.wait_for_timeout(1000)
             except Exception:
                 pass
-            html = page.content()
-            soup = BeautifulSoup(html, "lxml")
-            links: list[str] = []
-            host = urlparse(start_url).netloc
-            for a in soup.find_all("a", href=True):
-                h = a["href"]
-                if "/job/" not in h:
-                    continue
-                if "myworkdayjobs.com" not in h and not h.startswith("/"):
-                    continue
-                full = urljoin(start_url, h.split("?")[0])
-                if full not in links:
-                    links.append(full)
-            links = links[:max_list]
+            links = _workday_collect_listing_links(
+                page,
+                start_url,
+                max_list=max_list,
+                max_pages=max_pages,
+                employer=employer,
+            )
             logger.info(
-                "%s workday: %d job link(s) on listing (max_list=%d)",
+                "%s workday: %d job link(s) across listing (max_list=%d, max_pages=%d)",
                 employer,
                 len(links),
                 max_list,
+                max_pages,
             )
             for job_url in links:
                 try:

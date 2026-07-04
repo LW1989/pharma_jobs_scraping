@@ -43,6 +43,7 @@ employers:
     listing_nrw_scoped: true
     workday_url: https://qiagen.wd502.myworkdayjobs.com/de-DE/QIAGEN
     workday_max_list_jobs: 50
+    workday_max_listing_pages: 5
 
   # Location facet matches manual ~12 (Leverkusen area); unfiltered board lists more roles globally
   - name: Covestro
@@ -50,6 +51,7 @@ employers:
     listing_nrw_scoped: true
     workday_url: https://covestro.wd3.myworkdayjobs.com/de-DE/cov_external?locations=ff1397ebecb2016c13f9a0fe5c31b98d
     workday_max_list_jobs: 50
+    workday_max_listing_pages: 5
 
   # Filtered listing (Germany + NRW); paginated ?page=N. Direct Workday /JJ/ works too but careers URL matches your filters.
   - name: Johnson & Johnson

@@ -32,6 +32,7 @@ from scraper.nrw_eligibility import (  # noqa: E402
 )
 from scraper.nrw_major_fetchers import (  # noqa: E402
     JOB_PATH_RE,
+    _workday_collect_listing_links,
     fetch_jobs_for_employer,
     probe_jnj_careers_listing_link_count,
 )
@@ -65,43 +66,36 @@ def _eligibility_reason(location: str, text: str, *, scoped: bool) -> str:
     return "no NRW / remote / hybrid match"
 
 
-def _workday_listing_links(start_url: str, max_list: int) -> tuple[list[str], str]:
+def _workday_listing_links(
+    start_url: str, max_list: int, max_pages: int, employer: str
+) -> tuple[list[str], str]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return [], "playwright not installed"
 
-    links: list[str] = []
-    final_url = start_url
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
         page.set_default_timeout(60000)
         page.goto(start_url, wait_until="domcontentloaded")
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(4000)
         try:
             for btn in page.locator("button:has-text('Accept')").all()[:1]:
                 btn.click(timeout=3000)
                 page.wait_for_timeout(1000)
         except Exception:
             pass
-        for _ in range(3):
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(1500)
-        html = page.content()
+        links = _workday_collect_listing_links(
+            page,
+            start_url,
+            max_list=max_list,
+            max_pages=max_pages,
+            employer=employer,
+        )
         final_url = page.url
         browser.close()
-
-    for a in BeautifulSoup(html, "lxml").find_all("a", href=True):
-        h = a["href"]
-        if "/job/" not in h:
-            continue
-        if "myworkdayjobs.com" not in h and not h.startswith("/"):
-            continue
-        full = urljoin(start_url, h.split("?")[0])
-        if full not in links:
-            links.append(full)
-    return links[:max_list], final_url
+    return links, final_url
 
 
 def diagnose_workday(row: dict, listing_only: bool, sample: int) -> None:
@@ -109,12 +103,13 @@ def diagnose_workday(row: dict, listing_only: bool, sample: int) -> None:
     url = row["workday_url"]
     scoped = bool(row.get("listing_nrw_scoped"))
     max_list = int(row.get("workday_max_list_jobs", 60))
+    max_pages = int(row.get("workday_max_listing_pages", 10))
 
     print(f"\n{'='*72}")
     print(f"{name} [workday]  configured URL: {url}")
-    links, final_url = _workday_listing_links(url, max_list)
+    links, final_url = _workday_listing_links(url, max_list, max_pages, name)
     print(f"  listing resolved to: {final_url}")
-    print(f"  job links on listing: {len(links)}")
+    print(f"  job links on listing (all pages): {len(links)}")
     if not links:
         print("  → 0 eligible in production = listing found nothing (not eligibility filter).")
         if "wd3." in url and "wd502" not in url:

@@ -59,17 +59,19 @@ def sf_listing_links(base_list: str, page_param: str) -> tuple[int, list[str]]:
     return len(links), links
 
 
-def probe_workday(url: str) -> tuple[str, int]:
+def probe_workday(url: str, max_pages: int = 10) -> tuple[str, int]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return "playwright not installed", -1
     try:
+        from scraper.nrw_major_fetchers import _workday_collect_listing_links
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
             page.set_default_timeout(60000)
-            page.goto(url, wait_until="networkidle")
+            page.goto(url, wait_until="domcontentloaded")
             page.wait_for_timeout(4000)
             try:
                 for b in page.locator("button:has-text('Accept')").all()[:1]:
@@ -77,16 +79,15 @@ def probe_workday(url: str) -> tuple[str, int]:
                     page.wait_for_timeout(1000)
             except Exception:
                 pass
-            html = page.content()
+            links = _workday_collect_listing_links(
+                page,
+                url,
+                max_list=200,
+                max_pages=max_pages,
+                employer="probe",
+            )
             browser.close()
-        n = 0
-        for tag in BeautifulSoup(html, "lxml").find_all("a", href=True):
-            h = tag["href"]
-            if "/job/" in h and (
-                "myworkdayjobs.com" in h or h.startswith("/")
-            ):
-                n += 1
-        return "ok", n
+        return "ok", len(links)
     except Exception as exc:
         return str(exc)[:120], -1
 
@@ -157,9 +158,10 @@ def main() -> None:
 
             elif st == "workday":
                 url = row["workday_url"]
-                status, n = probe_workday(url)
+                max_pg = int(row.get("workday_max_listing_pages", 10))
+                status, n = probe_workday(url, max_pages=max_pg)
                 if n >= 0:
-                    print(f"{name:<22} {st:<14} {status}, ~{n} job anchors seen")
+                    print(f"{name:<22} {st:<14} {status}, {n} job link(s) (paginated)")
                 else:
                     print(f"{name:<22} {st:<14} FAIL {status}")
 
