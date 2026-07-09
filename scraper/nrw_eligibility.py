@@ -46,6 +46,16 @@ def location_in_nrw(text: str) -> bool:
     return False
 
 
+def location_in_benelux(text: str) -> bool:
+    if not text:
+        return False
+    low = text.lower()
+    for kw in _cfg().get("benelux_location_keywords") or []:
+        if kw and str(kw).lower() in low:
+            return True
+    return False
+
+
 def _text_has_any(haystack: str, needles: list[str]) -> bool:
     low = haystack.lower()
     return any(n.lower() in low for n in needles if n)
@@ -104,6 +114,84 @@ def job_text_eligible(location: str, detail_text: str) -> bool:
         return True
 
     return False
+
+
+def _location_suggests_remote(loc: str) -> bool:
+    """True when the location line/slug is explicitly a remote posting."""
+    if not loc:
+        return False
+    first = loc.split(",")[0].strip().lower()
+    if "remote" in first:
+        return True
+    return text_suggests_remote(loc)
+
+
+def job_text_eligible_nrw_benelux_remote(location: str, detail_text: str) -> bool:
+    """
+    NRW or Benelux on-site/hybrid; DE/EU remote/home office. Rejects other DE on-site.
+    When location is set (e.g. from Workday URL slug), geo checks use it — not full page body.
+    """
+    blob = f"{location or ''}\n{detail_text or ''}"
+    if text_suggests_us_only_remote(blob):
+        return False
+
+    geo = location.strip() if location else blob
+    in_nrw = location_in_nrw(geo)
+    in_benelux = location_in_benelux(geo)
+    concrete_onsite_loc = bool(location.strip()) and not _location_suggests_remote(location)
+
+    if concrete_onsite_loc:
+        return in_nrw or in_benelux
+
+    if _location_suggests_remote(location):
+        if not text_suggests_de_eu_emea(blob) and not _germany_or_neighbour_location(location):
+            return False
+        return True
+
+    hybrid = text_suggests_hybrid(blob)
+    if hybrid:
+        return in_nrw or in_benelux
+
+    remote = text_suggests_remote(blob)
+    if remote:
+        if not text_suggests_de_eu_emea(blob):
+            if not _germany_or_neighbour_location(location):
+                return False
+        return True
+
+    if in_nrw or in_benelux:
+        return True
+
+    return False
+
+
+def job_eligible_nrw_benelux_remote(
+    location: str,
+    detail_text: str,
+    *,
+    listing_nrw_scoped: bool = False,
+) -> bool:
+    blob = f"{location or ''}\n{detail_text or ''}"
+    if text_suggests_us_only_remote(blob):
+        return False
+    if listing_nrw_scoped:
+        return True
+    return job_text_eligible_nrw_benelux_remote(location, detail_text)
+
+
+def job_eligible_for_employer(
+    company: dict,
+    location: str,
+    detail_text: str,
+) -> bool:
+    """Dispatch eligibility by optional YAML key eligibility_profile (default: nrw)."""
+    profile = str(company.get("eligibility_profile") or "nrw").strip().lower()
+    scoped = bool(company.get("listing_nrw_scoped"))
+    if profile == "nrw_benelux_remote":
+        return job_eligible_nrw_benelux_remote(
+            location, detail_text, listing_nrw_scoped=scoped
+        )
+    return job_eligible_nrw_major(location, detail_text, listing_nrw_scoped=scoped)
 
 
 def job_eligible_nrw_major(

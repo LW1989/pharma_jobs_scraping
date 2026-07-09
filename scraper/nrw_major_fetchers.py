@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 
 from scraper import config
 from scraper.nrw_eligibility import (
+    job_eligible_for_employer,
     job_eligible_nrw_major,
     listing_row_worth_detail_fetch,
     location_in_nrw,
@@ -307,6 +308,16 @@ def fetch_successfactors_listing(company: dict) -> list[dict]:
     return jobs
 
 
+def _workday_location_from_job_url(url: str) -> str:
+    """Parse Workday /job/City-Region-Country/... slug into a location string."""
+    if "/job/" not in url:
+        return ""
+    slug = url.split("/job/")[-1].split("/")[0].split("?")[0]
+    if not slug:
+        return ""
+    return slug.replace("-", ", ")
+
+
 def _workday_extract_job_links(html: str, base_url: str) -> list[str]:
     """Unique job detail URLs from one Workday listing page."""
     links: list[str] = []
@@ -472,7 +483,6 @@ def fetch_workday_playwright(company: dict) -> list[dict]:
         return []
 
     employer = company["name"]
-    scoped = bool(company.get("listing_nrw_scoped"))
     jobs: list[dict] = []
 
     with sync_playwright() as p:
@@ -499,11 +509,19 @@ def fetch_workday_playwright(company: dict) -> list[dict]:
                     title = page.title() or ""
                 except Exception:
                     pass
-                if not job_eligible_nrw_major(
-                    "", body, listing_nrw_scoped=scoped
+                if not job_eligible_for_employer(
+                    company, _workday_location_from_job_url(job_url), body
                 ):
                     continue
-                jobs.append(_build_row(employer, title, job_url, "", body))
+                jobs.append(
+                    _build_row(
+                        employer,
+                        title,
+                        job_url,
+                        _workday_location_from_job_url(job_url)[:200],
+                        body,
+                    )
+                )
             logger.info("%s workday: %d eligible job(s) after filter", employer, len(jobs))
             browser.close()
         except Exception as exc:

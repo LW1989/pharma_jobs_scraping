@@ -10,8 +10,8 @@ Research date: **March 2026**. Context: this project’s company watchlist alrea
 |-------|------|
 | `run_nrw_major_checker.py` | Daily fetch for `input_data/nrw_major_employers.yaml` |
 | `scraper/nrw_major_fetchers.py` | SmartRecruiters, Bayer Eightfold API, SuccessFactors, Workday, UCB, Henkel, J&J careers, rexx portal, Dolorgiet static, Adhex HubSpot |
-| `scripts/nrw_major_health_check.py` | Weekly listing probes + email (16 employers) |
-| `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate |
+| `scripts/nrw_major_health_check.py` | Weekly listing probes + email (17 employers) |
+| `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate; optional `eligibility_profile: nrw_benelux_remote` for Benelux on-site |
 | `source = company_nrw_major` | DB rows; third section in email/Telegram reporter (scores + APPLY/review) |
 | Title filter | **Internship / Praktikum / Praktikant** (and whole-word **intern**) are **not stored** — skipped in `run_nrw_major_checker` |
 
@@ -30,6 +30,14 @@ LANXESS **career-jobboard.lanxess.com** is not in the default YAML (main site on
 | **AdhexPharma** | `adhex_hubspot` | Sitemap discovery; Langenfeld pages only |
 
 Apontis, Dolorgiet, and AdhexPharma were removed from `companies.yaml` watchlist to avoid duplicate scraping.
+
+### Added July 2026 — Medtronic
+
+| Employer | `source_type` | Notes |
+|----------|---------------|-------|
+| **Medtronic** | `workday` | `medtronic.wd1` Germany + Belgium `locationCountry` facets + Amsterdam city facet; `eligibility_profile: nrw_benelux_remote` accepts NRW + Benelux on-site/hybrid and DE/EU remote; rejects other DE on-site (e.g. Deggendorf) |
+
+Use `eligibility_profile: nrw_benelux_remote` as the pattern for future majors that should include Benelux offices alongside NRW.
 
 ---
 

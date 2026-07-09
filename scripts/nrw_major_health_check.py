@@ -69,6 +69,7 @@ MIN_EXPECTED: dict[str, int] = {
     "Dolorgiet": 1,
     "Klosterfrau": 3,
     "AdhexPharma": 1,
+    "Medtronic": 5,
 }
 
 # Employers that may legitimately have zero open roles (warn, not fail).

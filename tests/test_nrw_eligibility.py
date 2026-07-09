@@ -8,9 +8,13 @@ sys.path.insert(0, str(ROOT))
 
 from scraper.nrw_eligibility import (  # noqa: E402
     is_excluded_nrw_major_entry_level_title,
+    job_eligible_for_employer,
+    job_eligible_nrw_benelux_remote,
     job_eligible_nrw_major,
     job_text_eligible,
+    job_text_eligible_nrw_benelux_remote,
     listing_row_worth_detail_fetch,
+    location_in_benelux,
     location_in_nrw,
     smartrecruiters_posting_eligible,
     text_suggests_us_only_remote,
@@ -190,4 +194,49 @@ def test_ucb_monheim_keyword():
     assert not ucb_detail_eligible(
         "Based in Brussels, Belgium.",
         ["Monheim", "Mettmann"],
+    )
+
+
+def test_location_in_benelux():
+    assert location_in_benelux("Eindhoven, Netherlands")
+    assert location_in_benelux("Brussels, Belgium")
+    assert not location_in_benelux("Berlin, Germany")
+
+
+def test_job_eligible_nrw_benelux_remote_meerbusch():
+    assert job_eligible_nrw_benelux_remote(
+        "Meerbusch, Germany",
+        "On-site role at our Mollsfeld campus.",
+    )
+
+
+def test_job_eligible_nrw_benelux_remote_eindhoven():
+    assert job_eligible_nrw_benelux_remote(
+        "Eindhoven, Netherlands",
+        "Full-time on-site position.",
+    )
+
+
+def test_job_eligible_nrw_benelux_remote_deggendorf_rejected():
+    assert not job_eligible_nrw_benelux_remote(
+        "Deggendorf, Bavaria, Germany",
+        "Production role on-site at our Bavaria site. Remote jobs listed below.",
+    )
+
+
+def test_job_eligible_nrw_benelux_remote_germany_remote():
+    assert job_eligible_nrw_benelux_remote(
+        "Remote, Germany",
+        "Fully remote home office role open in Germany.",
+    )
+
+
+def test_job_eligible_for_employer_profile():
+    medtronic = {"eligibility_profile": "nrw_benelux_remote", "listing_nrw_scoped": False}
+    evonik = {"listing_nrw_scoped": False}
+    assert job_eligible_for_employer(
+        medtronic, "Brussels, Belgium", "On-site sales role."
+    )
+    assert not job_eligible_for_employer(
+        evonik, "Brussels, Belgium", "On-site sales role."
     )

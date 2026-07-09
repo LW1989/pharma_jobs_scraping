@@ -357,3 +357,30 @@ onsite_keywords:
   - am arbeitsplatz
   - keine homeoffice
   - no remote work
+
+# Benelux on-site/hybrid (Medtronic and similar); matched case-insensitively.
+benelux_location_keywords:
+  - Eindhoven
+  - Amsterdam
+  - Rotterdam
+  - Utrecht
+  - Den Haag
+  - The Hague
+  - Heerlen
+  - Maastricht
+  - Nederland
+  - Netherlands
+  - Brussels
+  - Bruxelles
+  - Diegem
+  - Leuven
+  - Mechelen
+  - Antwerp
+  - Antwerpen
+  - Gent
+  - Belgium
+  - België
+  - Belgique
+  - Belux
+  - Luxembourg
+  - Luxemburg

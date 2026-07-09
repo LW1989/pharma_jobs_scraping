@@ -133,3 +133,15 @@ employers:
     adhex_location_keywords:
       - Langenfeld
     max_jobs: 20
+
+  # Germany + Belgium country facets + Amsterdam city facet; NRW/Benelux/remote on detail
+  - name: Medtronic
+    source_type: workday
+    listing_nrw_scoped: false
+    eligibility_profile: nrw_benelux_remote
+    workday_url: https://medtronic.wd1.myworkdayjobs.com/en-US/MedtronicCareers?locationCountry=dcc5b7608d8644b3a93716604e78e995
+    workday_extra_urls:
+      - https://medtronic.wd1.myworkdayjobs.com/en-US/MedtronicCareers?locationCountry=a04ea128f43a42e59b1e6a19e8f0b374
+      - https://medtronic.wd1.myworkdayjobs.com/en-US/MedtronicCareers?locations=729c1e621ebc1001571819ceb21f0000
+    workday_max_list_jobs: 150
+    workday_max_listing_pages: 10

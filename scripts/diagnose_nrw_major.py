@@ -26,8 +26,15 @@ sys.path.insert(0, str(ROOT))
 
 from scraper import config  # noqa: E402
 from scraper.nrw_eligibility import (  # noqa: E402
+    _location_suggests_remote,
+    job_eligible_for_employer,
+    job_eligible_nrw_benelux_remote,
     job_eligible_nrw_major,
     job_text_eligible,
+    job_text_eligible_nrw_benelux_remote,
+    location_in_benelux,
+    location_in_nrw,
+    text_suggests_remote,
     text_suggests_us_only_remote,
 )
 from scraper.nrw_major_fetchers import (  # noqa: E402
@@ -36,6 +43,7 @@ from scraper.nrw_major_fetchers import (  # noqa: E402
     _ucb_apply_listing_filters,
     _ucb_collect_job_links,
     _workday_gather_listing_links,
+    _workday_location_from_job_url,
     fetch_jobs_for_employer,
     probe_adhex_hubspot_job_count,
     probe_dolorgiet_job_count,
@@ -59,12 +67,39 @@ def _load_employers(name: str | None) -> list[dict]:
     return rows
 
 
-def _eligibility_reason(location: str, text: str, *, scoped: bool) -> str:
+def _eligibility_reason(
+    location: str,
+    text: str,
+    *,
+    scoped: bool,
+    profile: str = "nrw",
+) -> str:
     blob = f"{location or ''}\n{text or ''}"
     if text_suggests_us_only_remote(blob):
         return "US-only remote"
     if scoped:
         return "pass (listing NRW-scoped)"
+    if profile == "nrw_benelux_remote":
+        if job_text_eligible_nrw_benelux_remote(location, text):
+            geo = location if location else blob
+            if location_in_nrw(geo):
+                return "pass (NRW)"
+            if location_in_benelux(geo):
+                return "pass (Benelux)"
+            if text_suggests_remote(blob):
+                return "pass (remote DE/EU)"
+            return "pass (NRW/Benelux/remote rules)"
+        if "remote" in blob.lower() and not any(
+            x in blob.lower()
+            for x in ("germany", "deutschland", "europe", "emea", "eu ", "dach", "benelux")
+        ):
+            return "remote but no DE/EU region hint"
+        if location.strip() and not _location_suggests_remote(location):
+            if not location_in_nrw(location) and not location_in_benelux(location):
+                return "no NRW / Benelux / remote match (e.g. other DE on-site)"
+        if location_in_nrw(blob) or location_in_benelux(blob):
+            return "hybrid without NRW/Benelux office"
+        return "no NRW / Benelux / remote match (e.g. other DE on-site)"
     if job_text_eligible(location, text):
         return "pass (remote/hybrid/NRW rules)"
     if "remote" in blob.lower() and not any(
@@ -105,14 +140,46 @@ def _workday_link_breakdown(links: list[str]) -> dict[str, int]:
     return dict(buckets)
 
 
+def _workday_eligibility_breakdown(
+    links: list[str], bodies: dict[str, str], row: dict
+) -> dict[str, int]:
+    profile = str(row.get("eligibility_profile") or "nrw").strip().lower()
+    scoped = bool(row.get("listing_nrw_scoped"))
+    counts = {"nrw": 0, "benelux": 0, "remote": 0, "rejected": 0, "eligible": 0}
+    for url in links:
+        body = bodies.get(url, "")
+        loc = _workday_location_from_job_url(url)
+        if not job_eligible_for_employer(row, loc, body):
+            counts["rejected"] += 1
+            continue
+        counts["eligible"] += 1
+        if scoped:
+            continue
+        geo = loc or body
+        if profile == "nrw_benelux_remote":
+            if location_in_nrw(geo):
+                counts["nrw"] += 1
+            elif location_in_benelux(geo):
+                counts["benelux"] += 1
+            elif text_suggests_remote(body):
+                counts["remote"] += 1
+        elif location_in_nrw(geo):
+            counts["nrw"] += 1
+        elif text_suggests_remote(body):
+            counts["remote"] += 1
+    return counts
+
+
 def diagnose_workday(row: dict, listing_only: bool, sample: int) -> None:
     name = row["name"]
     url = row["workday_url"]
     scoped = bool(row.get("listing_nrw_scoped"))
+    profile = str(row.get("eligibility_profile") or "nrw")
     path_include = row.get("workday_path_include") or []
 
     print(f"\n{'='*72}")
     print(f"{name} [workday]  configured URL: {url}")
+    print(f"  eligibility_profile: {profile}")
     if path_include:
         print(f"  path filter: {path_include}")
     links, final_url = _workday_listing_links(row, 0, 0, name)
@@ -141,6 +208,7 @@ def diagnose_workday(row: dict, listing_only: bool, sample: int) -> None:
     eligible = 0
     detail_fail = 0
     rejected: list[tuple[str, str]] = []
+    bodies: dict[str, str] = {}
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -156,17 +224,32 @@ def diagnose_workday(row: dict, listing_only: bool, sample: int) -> None:
                 page.wait_for_timeout(2000)
                 body = page.inner_text("body")[:12000]
                 title = page.title() or ""
+                bodies[job_url] = body
             except Exception as exc:
                 detail_fail += 1
                 rejected.append((job_url, f"detail fetch failed: {exc}"[:80]))
                 continue
-            if job_eligible_nrw_major("", body, listing_nrw_scoped=scoped):
+            loc = _workday_location_from_job_url(job_url)
+            if job_eligible_for_employer(row, loc, body):
                 eligible += 1
             else:
-                rejected.append((job_url, _eligibility_reason("", body, scoped=scoped)))
+                rejected.append(
+                    (
+                        job_url,
+                        _eligibility_reason(loc, body, scoped=scoped, profile=profile),
+                    )
+                )
         browser.close()
 
     print(f"  detail sample ({min(sample, len(links))}): eligible={eligible}, fetch_fail={detail_fail}")
+    if bodies:
+        breakdown = _workday_eligibility_breakdown(list(bodies.keys()), bodies, row)
+        if profile == "nrw_benelux_remote":
+            print(
+                f"  eligibility breakdown: eligible={breakdown['eligible']}, "
+                f"NRW={breakdown['nrw']}, Benelux={breakdown['benelux']}, "
+                f"remote={breakdown['remote']}, rejected={breakdown['rejected']}"
+            )
     for url_, reason in rejected[:6]:
         print(f"    ✗ {reason}")
         print(f"      {url_[:90]}")
