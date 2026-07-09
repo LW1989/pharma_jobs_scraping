@@ -31,14 +31,18 @@ sys.path.insert(0, str(ROOT))
 from scraper import config  # noqa: E402
 from scraper.nrw_major_fetchers import (  # noqa: E402
     JOB_PATH_RE,
+    _sf_listing_page_url,
     _ucb_apply_listing_filters,
     _ucb_collect_job_links,
     _workday_gather_listing_links,
     fetch_bayer_eightfold,
     fetch_smartrecruiters,
+    probe_adhex_hubspot_job_count,
+    probe_dolorgiet_job_count,
     probe_henkel_portal_link_count,
     probe_jnj_careers_listing_link_count,
     probe_lanxess_portal_link_count,
+    probe_rexx_portal_link_count,
 )
 import reporter.email_sender  # noqa: E402
 
@@ -58,7 +62,17 @@ MIN_EXPECTED: dict[str, int] = {
     "Covestro": 2,
     "Johnson & Johnson": 10,
     "UCB": 5,
+    "Evonik": 10,
+    "Octapharma": 2,
+    "Janssen-Cilag": 3,
+    "Apontis Pharma": 1,
+    "Dolorgiet": 1,
+    "Klosterfrau": 3,
+    "AdhexPharma": 1,
 }
+
+# Employers that may legitimately have zero open roles (warn, not fail).
+WARN_IF_ZERO: set[str] = {"Apontis Pharma"}
 
 
 @dataclass
@@ -74,6 +88,8 @@ def _status_for(name: str, count: int, error: str | None = None) -> str:
     if error or count < 0:
         return "fail"
     if count == 0:
+        if name in WARN_IF_ZERO:
+            return "warn"
         return "fail"
     if count < MIN_EXPECTED.get(name, 1):
         return "warn"
@@ -86,8 +102,8 @@ def _sf_listing_count(row: dict) -> tuple[int, str]:
 
     base = row["listing_base_url"]
     param = row.get("page_param", "Page")
-    sep = "&" if "?" in base else "?"
-    url = f"{base.rstrip('/')}{sep}{param}=1"
+    page_size = int(row.get("sf_page_size", 10))
+    url = _sf_listing_page_url(base.rstrip("/"), 1, param, page_size)
     r = requests.get(url, headers=config.HEADERS, timeout=45)
     r.raise_for_status()
     parsed = urlparse(url if "://" in url else f"https://{url}")
@@ -180,6 +196,21 @@ def check_employer(row: dict) -> CheckResult:
         elif st == "ucb":
             n, detail = _probe_ucb(row)
             err = None
+        elif st == "rexx_portal":
+            status, n = probe_rexx_portal_link_count(row)
+            detail = f"rexx listing ({row.get('rexx_location_filter', '')})"
+            err = _playwright_unavailable(Exception(status)) if n < 0 and "launch" in status else (
+                None if n >= 0 else status
+            )
+        elif st == "dolorgiet_static":
+            status, n = probe_dolorgiet_job_count(row)
+            detail = "static h2 postings"
+            err = None if n >= 0 else status
+        elif st == "adhex_hubspot":
+            status, n = probe_adhex_hubspot_job_count(row)
+            kw = row.get("adhex_location_keywords") or ["Langenfeld"]
+            detail = f"sitemap Langenfeld filter {kw}"
+            err = None if n >= 0 else status
         else:
             return CheckResult(name, st, "fail", -1, f"unknown source_type {st!r}")
 

@@ -176,18 +176,6 @@ companies:
     career_url: https://evoxx.com/people/jobs-and-career/
     source_type: html
 
-  - name: Apontis
-    city: Monheim
-    country: Germany
-    career_url: https://apontis-pharma.de/karriere-bei-apontis-pharma
-    source_type: html
-
-  - name: AdhexPharma
-    city: Langenfeld
-    country: Germany
-    career_url: https://www.adhexpharma.com/de/karriere
-    source_type: html
-
   # ── Dortmund area ──────────────────────────────────────────────────────────
 
   - name: Chimera BioTec
@@ -254,12 +242,6 @@ companies:
     city: Sankt Augustin
     country: Germany
     career_url: https://www.biosolveit.de/career/
-    source_type: html
-
-  - name: Dolorgiet
-    city: Sankt Augustin
-    country: Germany
-    career_url: https://www.dolorgiet.de/karriere
     source_type: html
 
   - name: Eurocor

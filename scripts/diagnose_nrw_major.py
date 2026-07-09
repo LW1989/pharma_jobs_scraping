@@ -32,13 +32,17 @@ from scraper.nrw_eligibility import (  # noqa: E402
 )
 from scraper.nrw_major_fetchers import (  # noqa: E402
     JOB_PATH_RE,
+    _sf_listing_page_url,
     _ucb_apply_listing_filters,
     _ucb_collect_job_links,
     _workday_gather_listing_links,
     fetch_jobs_for_employer,
+    probe_adhex_hubspot_job_count,
+    probe_dolorgiet_job_count,
     probe_henkel_portal_link_count,
     probe_jnj_careers_listing_link_count,
     probe_lanxess_portal_link_count,
+    probe_rexx_portal_link_count,
 )
 
 YAML_PATH = ROOT / "input_data" / "nrw_major_employers.yaml"
@@ -221,8 +225,8 @@ def diagnose_successfactors(row: dict) -> None:
     name = row["name"]
     base = row["listing_base_url"]
     param = row.get("page_param", "Page")
-    sep = "&" if "?" in base else "?"
-    url = f"{base.rstrip('/')}{sep}{param}=1"
+    page_size = int(row.get("sf_page_size", 10))
+    url = _sf_listing_page_url(base.rstrip("/"), 1, param, page_size)
     print(f"\n{'='*72}")
     print(f"{name} [successfactors]")
     print(f"  listing URL: {url}")
@@ -316,6 +320,51 @@ def diagnose_lanxess(row: dict, listing_only: bool) -> None:
         print(f"    ✓ {(j.get('title') or '')[:70]}")
 
 
+def diagnose_rexx(row: dict, listing_only: bool) -> None:
+    name = row["name"]
+    listing = row.get("listing_url", "")
+    print(f"\n{'='*72}")
+    print(f"{name} [rexx_portal]  listing: {listing}")
+    status, n = probe_rexx_portal_link_count(row)
+    print(f"  job links on listing: {status}, {n}")
+    if n == 0:
+        print("  → 0 links (may have no open roles, or JS-rendered list)")
+    if listing_only:
+        return
+    jobs = fetch_jobs_for_employer(row)
+    print(f"  eligible jobs returned: {len(jobs)}")
+
+
+def diagnose_dolorgiet(row: dict, listing_only: bool) -> None:
+    name = row["name"]
+    url = row.get("careers_url", "")
+    print(f"\n{'='*72}")
+    print(f"{name} [dolorgiet_static]  URL: {url}")
+    status, n = probe_dolorgiet_job_count(row)
+    print(f"  job headings on page: {status}, {n}")
+    if listing_only:
+        return
+    jobs = fetch_jobs_for_employer(row)
+    print(f"  jobs returned: {len(jobs)}")
+    for j in jobs:
+        print(f"    ✓ {(j.get('title') or '')[:70]}")
+
+
+def diagnose_adhex(row: dict, listing_only: bool) -> None:
+    name = row["name"]
+    sitemap = row.get("sitemap_url", "")
+    kw = row.get("adhex_location_keywords") or ["Langenfeld"]
+    print(f"\n{'='*72}")
+    print(f"{name} [adhex_hubspot]  sitemap: {sitemap}")
+    print(f"  location filter: {kw}")
+    status, n = probe_adhex_hubspot_job_count(row)
+    print(f"  Langenfeld-eligible pages: {status}, {n}")
+    if listing_only:
+        return
+    jobs = fetch_jobs_for_employer(row)
+    print(f"  eligible jobs returned: {len(jobs)}")
+
+
 def diagnose_api_fallback(row: dict) -> None:
     name = row["name"]
     st = row["source_type"]
@@ -349,6 +398,12 @@ def main() -> None:
             diagnose_lanxess(row, args.listing_only)
         elif st == "ucb":
             diagnose_ucb(row, args.listing_only)
+        elif st == "rexx_portal":
+            diagnose_rexx(row, args.listing_only)
+        elif st == "dolorgiet_static":
+            diagnose_dolorgiet(row, args.listing_only)
+        elif st == "adhex_hubspot":
+            diagnose_adhex(row, args.listing_only)
         else:
             diagnose_api_fallback(row)
 

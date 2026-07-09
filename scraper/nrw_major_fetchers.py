@@ -220,6 +220,19 @@ def fetch_bayer_eightfold(company: dict) -> list[dict]:
     return jobs
 
 
+def _sf_listing_page_url(
+    base_list: str, page: int, page_param: str, page_size: int = 10
+) -> str:
+    """Build paginated SuccessFactors RMK listing URL."""
+    if page <= 1 and page_param.lower() == "startrow":
+        return base_list
+    sep = "&" if "?" in base_list else "?"
+    if page_param.lower() == "startrow":
+        offset = (page - 1) * page_size
+        return f"{base_list}{sep}{page_param}={offset}"
+    return f"{base_list}{sep}{page_param}={page}"
+
+
 def fetch_successfactors_listing(company: dict) -> list[dict]:
     """
     Paginated listing (SAP SuccessFactors RMK style: /job/slug/id/).
@@ -232,6 +245,7 @@ def fetch_successfactors_listing(company: dict) -> list[dict]:
     origin = f"{parsed.scheme}://{parsed.netloc}"
     max_pages = int(company.get("max_pages", 20))
     page_param = company.get("page_param", "Page")
+    page_size = int(company.get("sf_page_size", 10))
     scoped = bool(company.get("listing_nrw_scoped"))
     max_detail_attempts = company.get("max_detail_attempts")
     if max_detail_attempts is not None:
@@ -241,8 +255,7 @@ def fetch_successfactors_listing(company: dict) -> list[dict]:
     detail_attempts = 0
 
     for page in range(1, max_pages + 1):
-        sep = "&" if "?" in base_list else "?"
-        list_url = f"{base_list}{sep}{page_param}={page}"
+        list_url = _sf_listing_page_url(base_list, page, page_param, page_size)
         try:
             resp = _SESSION.get(list_url, timeout=config.REQUEST_TIMEOUT_SECONDS)
             resp.raise_for_status()
@@ -882,6 +895,11 @@ def fetch_jnj_careers_playwright(company: dict) -> list[dict]:
                     ),
                 ):
                     continue
+                detail_kw = company.get("jnj_detail_keywords") or []
+                if detail_kw:
+                    blob = body.lower()
+                    if not any(kw.lower() in blob for kw in detail_kw):
+                        continue
                 try:
                     title = page.title() or ""
                 except Exception:
@@ -1049,6 +1067,310 @@ def fetch_henkel_playwright(company: dict) -> list[dict]:
     return jobs
 
 
+REXX_YID_RE = re.compile(
+    r"stellenangebot\.html\?yid=(\d+)|[?&]yid=(\d+)", re.I
+)
+ADHEX_JOB_PATH_RE = re.compile(
+    r"https?://(?:www\.)?adhexpharma\.com/de/(?:job-|pharmazie|techn|ingenieur)[^\s\"'<>]*",
+    re.I,
+)
+
+
+def _rexx_job_urls_from_html(html: str, base_url: str) -> list[str]:
+    """Extract rexx job detail URLs from listing HTML."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in REXX_YID_RE.finditer(html):
+        yid = m.group(1) or m.group(2)
+        if not yid:
+            continue
+        full = urljoin(base_url, f"stellenangebot.html?yid={yid}")
+        if full not in seen:
+            seen.add(full)
+            out.append(full)
+    soup = BeautifulSoup(html, "lxml")
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        low = href.lower()
+        if "stellenangebot.html" not in low:
+            continue
+        if "stellenangebote.html" in low:
+            continue
+        if "yid=" not in low:
+            continue
+        full = urljoin(base_url, href.split("#")[0])
+        if full not in seen:
+            seen.add(full)
+            out.append(full)
+    return out
+
+
+def probe_rexx_portal_link_count(company: dict) -> tuple[str, int]:
+    """Listing-only: count rexx job detail URLs."""
+    base = (company.get("rexx_base_url") or "").rstrip("/") + "/"
+    listing = company.get("listing_url") or urljoin(base, "stellenangebote.html")
+    try:
+        r = _SESSION.get(listing, timeout=45)
+        r.raise_for_status()
+        urls = _rexx_job_urls_from_html(r.text, base)
+        if urls:
+            return "ok", len(urls)
+    except Exception as exc:
+        return str(exc)[:120], -1
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "ok", 0
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+            page.goto(listing, wait_until="domcontentloaded", timeout=90000)
+            page.wait_for_timeout(5000)
+            urls = _rexx_job_urls_from_html(page.content(), base)
+            browser.close()
+        return "ok", len(urls)
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc) or "playwright install" in str(exc).lower():
+            return "ok", 0
+        return str(exc)[:120], -1
+
+
+def fetch_rexx_portal(company: dict) -> list[dict]:
+    """
+    rexx systems job portal (e.g. Apontis Pharma).
+    Listing page + optional Playwright render; detail at stellenangebot.html?yid=.
+    """
+    employer = company["name"]
+    base = (company.get("rexx_base_url") or "").rstrip("/") + "/"
+    listing = company.get("listing_url") or urljoin(base, "stellenangebote.html")
+    max_jobs = int(company.get("max_jobs", 30))
+    scoped = bool(company.get("listing_nrw_scoped", True))
+    loc_filter = (company.get("rexx_location_filter") or "").strip()
+    jobs: list[dict] = []
+
+    job_urls: list[str] = []
+    try:
+        r = _SESSION.get(listing, timeout=45)
+        r.raise_for_status()
+        job_urls = _rexx_job_urls_from_html(r.text, base)
+    except Exception as exc:
+        logger.warning("%s rexx listing HTTP: %s", employer, exc)
+
+    if not job_urls:
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            logger.warning("playwright not installed — skip rexx portal %s", employer)
+            return []
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+                page.goto(listing, wait_until="domcontentloaded", timeout=90000)
+                page.wait_for_timeout(5000)
+                job_urls = _rexx_job_urls_from_html(page.content(), base)
+                browser.close()
+        except Exception as exc:
+            logger.warning("%s rexx Playwright listing: %s", employer, exc)
+            return []
+
+    for job_url in job_urls[:max_jobs]:
+        try:
+            r = _SESSION.get(job_url, timeout=45)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "lxml")
+            for tag in soup(["script", "style", "nav", "footer"]):
+                tag.decompose()
+            body = soup.get_text(separator="\n", strip=True)[:12000]
+            h1 = soup.find("h1")
+            title = h1.get_text(strip=True) if h1 else ""
+            if not title:
+                t = soup.find("title")
+                title = t.get_text(strip=True) if t else ""
+            loc = loc_filter or ""
+            if loc_filter and loc_filter.lower() not in body.lower():
+                if scoped:
+                    continue
+        except Exception as exc:
+            logger.debug("%s rexx detail %s: %s", employer, job_url, exc)
+            continue
+        if not job_eligible_nrw_major(loc, body, listing_nrw_scoped=scoped):
+            continue
+        jobs.append(_build_row(employer, title, job_url, loc, body))
+        time.sleep(config.REQUEST_DELAY_SECONDS)
+    return jobs
+
+
+def probe_dolorgiet_job_count(company: dict) -> tuple[str, int]:
+    """Count job headings on Dolorgiet static karriere page."""
+    url = company.get("careers_url", "https://www.dolorgiet.de/karriere")
+    try:
+        r = _SESSION.get(url, timeout=45)
+        r.raise_for_status()
+        return "ok", len(_dolorgiet_extract_postings(r.text, url))
+    except Exception as exc:
+        return str(exc)[:120], -1
+
+
+def _dolorgiet_extract_postings(html: str, careers_url: str) -> list[tuple[str, str, str]]:
+    """Return (title, job_url, pdf_url) from static karriere page."""
+    soup = BeautifulSoup(html, "lxml")
+    postings: list[tuple[str, str, str]] = []
+    base = careers_url.rstrip("/")
+    for h2 in soup.find_all("h2"):
+        title = h2.get_text(strip=True)
+        if not title or len(title) < 8:
+            continue
+        if not re.search(r"\(m/w/d\)|\(m/w/x\)|\(w/m/d\)", title, re.I):
+            continue
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:60].strip("-")
+        job_url = f"{base}#{slug}" if slug else base
+        pdf_url = ""
+        sib = h2.find_next_sibling()
+        for _ in range(4):
+            if sib is None:
+                break
+            for a in sib.find_all("a", href=True) if hasattr(sib, "find_all") else []:
+                if ".pdf" in a["href"].lower() or "file=" in a["href"].lower():
+                    pdf_url = urljoin(careers_url, a["href"])
+                    break
+            if pdf_url:
+                break
+            sib = sib.find_next_sibling()
+        postings.append((title, job_url, pdf_url))
+    return postings
+
+
+def fetch_dolorgiet_static(company: dict) -> list[dict]:
+    """Dolorgiet static karriere page (h2 titles + optional PDF links)."""
+    employer = company["name"]
+    careers_url = company.get("careers_url", "https://www.dolorgiet.de/karriere")
+    location = "Sankt Augustin, Germany"
+    jobs: list[dict] = []
+    try:
+        r = _SESSION.get(careers_url, timeout=45)
+        r.raise_for_status()
+    except Exception as exc:
+        logger.warning("Dolorgiet karriere: %s", exc)
+        return []
+    for title, job_url, pdf_url in _dolorgiet_extract_postings(r.text, careers_url):
+        details = f"{title}\n\nStandort: {location}"
+        if pdf_url:
+            details += f"\n\nStellenbeschreibung (PDF): {pdf_url}"
+        jobs.append(_build_row(employer, title, job_url, location, details))
+    return jobs
+
+
+def _adhex_discover_job_urls(sitemap_url: str) -> list[str]:
+    """Job detail URLs from AdhexPharma HubSpot sitemap."""
+    r = _SESSION.get(sitemap_url, timeout=45)
+    r.raise_for_status()
+    urls = re.findall(r"<loc>([^<]+)</loc>", r.text)
+    job_urls: list[str] = []
+    seen: set[str] = set()
+    for u in urls:
+        if "/de/" not in u:
+            continue
+        low = u.lower()
+        if not any(
+            x in low
+            for x in ("/job-", "/pharmazie", "ingenieur", "techn", "praktik")
+        ):
+            continue
+        if "/karriere" in low or "/blog" in low or "/news" in low:
+            continue
+        if "/de/de/" in u:
+            continue
+        if u not in seen:
+            seen.add(u)
+            job_urls.append(u)
+    return job_urls
+
+
+def _adhex_location_eligible(body: str, keywords: list[str]) -> bool:
+    """True if job page is at a Langenfeld (etc.) site, not Hamburg-only."""
+    m = re.search(r"Ort:\s*([^\n]+)", body, re.I)
+    if m:
+        loc_line = m.group(1).strip().lower()
+        if "hamburg" in loc_line and "langenfeld" not in loc_line:
+            return False
+        return any(kw.lower() in loc_line for kw in keywords)
+    blob = body.lower()
+    if "hamburg" in blob and "langenfeld" not in blob:
+        return False
+    return any(kw.lower() in blob for kw in keywords)
+
+
+def probe_adhex_hubspot_job_count(company: dict) -> tuple[str, int]:
+    """Count Langenfeld-eligible AdhexPharma job pages."""
+    sitemap = company.get("sitemap_url", "https://www.adhexpharma.com/sitemap.xml")
+    keywords = company.get("adhex_location_keywords") or ["Langenfeld"]
+    try:
+        urls = _adhex_discover_job_urls(sitemap)
+        n = 0
+        for u in urls:
+            try:
+                r = _SESSION.get(u, timeout=45)
+                r.raise_for_status()
+                body = r.text
+                if _adhex_location_eligible(body, keywords):
+                    n += 1
+            except Exception:
+                continue
+        return "ok", n
+    except Exception as exc:
+        return str(exc)[:120], -1
+
+
+def fetch_adhex_hubspot(company: dict) -> list[dict]:
+    """AdhexPharma / Labtec HubSpot per-job pages (sitemap discovery)."""
+    employer = company["name"]
+    sitemap = company.get("sitemap_url", "https://www.adhexpharma.com/sitemap.xml")
+    keywords = company.get("adhex_location_keywords") or ["Langenfeld"]
+    max_jobs = int(company.get("max_jobs", 20))
+    scoped = bool(company.get("listing_nrw_scoped", False))
+    jobs: list[dict] = []
+
+    try:
+        urls = _adhex_discover_job_urls(sitemap)
+    except Exception as exc:
+        logger.warning("AdhexPharma sitemap: %s", exc)
+        return []
+
+    for job_url in urls[: max_jobs * 3]:
+        if len(jobs) >= max_jobs:
+            break
+        try:
+            r = _SESSION.get(job_url, timeout=45)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "lxml")
+            for tag in soup(["script", "style", "nav", "footer"]):
+                tag.decompose()
+            body = soup.get_text(separator="\n", strip=True)[:12000]
+        except Exception as exc:
+            logger.debug("AdhexPharma %s: %s", job_url, exc)
+            continue
+        if not _adhex_location_eligible(body, keywords):
+            continue
+        h1 = soup.find("h1")
+        title = h1.get_text(strip=True) if h1 else ""
+        if not title:
+            t = soup.find("title")
+            title = t.get_text(strip=True) if t else ""
+        loc = ""
+        m = re.search(r"Ort:\s*([^\n]+)", body, re.I)
+        if m:
+            loc = m.group(1).strip()
+        if not job_eligible_nrw_major(loc, body, listing_nrw_scoped=scoped):
+            continue
+        jobs.append(_build_row(employer, title, job_url, loc, body))
+        time.sleep(config.REQUEST_DELAY_SECONDS)
+    return jobs
+
+
 def fetch_jobs_for_employer(company: dict) -> list[dict]:
     st = company.get("source_type", "")
     if st == "smartrecruiters":
@@ -1067,5 +1389,11 @@ def fetch_jobs_for_employer(company: dict) -> list[dict]:
         return fetch_henkel_playwright(company)
     if st == "jnj_careers":
         return fetch_jnj_careers_playwright(company)
+    if st == "rexx_portal":
+        return fetch_rexx_portal(company)
+    if st == "dolorgiet_static":
+        return fetch_dolorgiet_static(company)
+    if st == "adhex_hubspot":
+        return fetch_adhex_hubspot(company)
     logger.warning("Unknown NRW employer source_type: %s", st)
     return []

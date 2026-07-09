@@ -9,12 +9,27 @@ Research date: **March 2026**. Context: this project’s company watchlist alrea
 | Piece | Role |
 |-------|------|
 | `run_nrw_major_checker.py` | Daily fetch for `input_data/nrw_major_employers.yaml` |
-| `scraper/nrw_major_fetchers.py` | SmartRecruiters, **Bayer Eightfold API**, SuccessFactors, Workday, UCB, Henkel, J&J careers |
+| `scraper/nrw_major_fetchers.py` | SmartRecruiters, Bayer Eightfold API, SuccessFactors, Workday, UCB, Henkel, J&J careers, rexx portal, Dolorgiet static, Adhex HubSpot |
+| `scripts/nrw_major_health_check.py` | Weekly listing probes + email (16 employers) |
 | `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate |
 | `source = company_nrw_major` | DB rows; third section in email/Telegram reporter (scores + APPLY/review) |
 | Title filter | **Internship / Praktikum / Praktikant** (and whole-word **intern**) are **not stored** — skipped in `run_nrw_major_checker` |
 
 LANXESS **career-jobboard.lanxess.com** is not in the default YAML (main site only). Add a second employer row if you need EMEA board jobs.
+
+### Added July 2026 (7 employers)
+
+| Employer | `source_type` | Notes |
+|----------|---------------|-------|
+| **Evonik** | `workday` | Germany facet on `evonik.wd3`; NRW filter on detail (Essen, Marl, Herne, Wesseling) |
+| **Octapharma** | `successfactors` | `careers.octapharma.com` + `locationsearch=Langenfeld` |
+| **Janssen-Cilag** | `jnj_careers` | `search=Janssen` + DE + NRW; `jnj_detail_keywords` on detail |
+| **Apontis Pharma** | `rexx_portal` | rexx systems at `apontis-pharma.de/karriere/`; health warns if 0 jobs |
+| **Dolorgiet** | `dolorgiet_static` | Static h2 + PDF links on `dolorgiet.de/karriere` |
+| **Klosterfrau** | `successfactors` | `klosterfrau-jobs.com/klosterfraucologne` + Köln search |
+| **AdhexPharma** | `adhex_hubspot` | Sitemap discovery; Langenfeld pages only |
+
+Apontis, Dolorgiet, and AdhexPharma were removed from `companies.yaml` watchlist to avoid duplicate scraping.
 
 ---
 

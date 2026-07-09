@@ -76,3 +76,60 @@ employers:
       - Monheim am Rhein
       - Monheim
       - Mettmann
+
+  # Germany Workday board; NRW filter on detail (Essen, Marl, Herne, Wesseling, …)
+  - name: Evonik
+    source_type: workday
+    listing_nrw_scoped: false
+    workday_url: https://evonik.wd3.myworkdayjobs.com/de-DE/External_Careers?locations=2cfdd81278e6013aac663fb9b5004419
+    workday_max_list_jobs: 120
+    workday_max_listing_pages: 10
+
+  - name: Octapharma
+    source_type: successfactors
+    listing_nrw_scoped: true
+    listing_base_url: https://careers.octapharma.com/search/?q=&locationsearch=Langenfeld&sortColumn=referencedate&sortDirection=desc
+    max_pages: 5
+    page_param: startrow
+    sf_page_size: 10
+
+  - name: Janssen-Cilag
+    source_type: jnj_careers
+    listing_nrw_scoped: false
+    listing_url: https://www.careers.jnj.com/en/jobs/?search=Janssen&country=Germany&state=North+Rhine-Westphalia&pagesize=20#results
+    jnj_detail_keywords:
+      - Neuss
+      - Janssen-Cilag
+      - Janssen
+    jnj_max_listing_pages: 10
+    max_jobs: 40
+
+  - name: Apontis Pharma
+    source_type: rexx_portal
+    listing_nrw_scoped: true
+    listing_url: https://apontis-pharma.de/karriere/stellenangebote.html
+    rexx_base_url: https://apontis-pharma.de/karriere/
+    rexx_location_filter: Monheim
+    max_jobs: 30
+    health_warn_if_zero: true
+
+  - name: Dolorgiet
+    source_type: dolorgiet_static
+    listing_nrw_scoped: true
+    careers_url: https://www.dolorgiet.de/karriere
+
+  - name: Klosterfrau
+    source_type: successfactors
+    listing_nrw_scoped: true
+    listing_base_url: https://klosterfrau-jobs.com/klosterfraucologne/search/?q=&locationsearch=K%C3%B6ln
+    max_pages: 5
+    page_param: startrow
+    sf_page_size: 10
+
+  - name: AdhexPharma
+    source_type: adhex_hubspot
+    listing_nrw_scoped: false
+    sitemap_url: https://www.adhexpharma.com/sitemap.xml
+    adhex_location_keywords:
+      - Langenfeld
+    max_jobs: 20
