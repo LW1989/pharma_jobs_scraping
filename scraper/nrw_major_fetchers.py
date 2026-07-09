@@ -1113,15 +1113,14 @@ def probe_rexx_portal_link_count(company: dict) -> tuple[str, int]:
         r = _SESSION.get(listing, timeout=45)
         r.raise_for_status()
         urls = _rexx_job_urls_from_html(r.text, base)
-        if urls:
-            return "ok", len(urls)
+        return "ok", len(urls)
     except Exception as exc:
-        return str(exc)[:120], -1
+        http_err = str(exc)[:120]
 
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return "ok", 0
+        return http_err, -1
 
     try:
         with sync_playwright() as p:
@@ -1134,7 +1133,7 @@ def probe_rexx_portal_link_count(company: dict) -> tuple[str, int]:
         return "ok", len(urls)
     except Exception as exc:
         if "Executable doesn't exist" in str(exc) or "playwright install" in str(exc).lower():
-            return "ok", 0
+            return http_err, -1
         return str(exc)[:120], -1
 
 
