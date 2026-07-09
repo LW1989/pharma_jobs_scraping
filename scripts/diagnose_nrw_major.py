@@ -30,16 +30,23 @@ from scraper.nrw_eligibility import (  # noqa: E402
     job_eligible_for_employer,
     job_eligible_nrw_benelux_remote,
     job_eligible_nrw_major,
+    job_eligible_syneos_clinical_eu,
+    job_language_requirements_acceptable,
     job_text_eligible,
     job_text_eligible_nrw_benelux_remote,
     location_in_benelux,
     location_in_nrw,
+    syneos_country_from_location,
+    syneos_geo_eligible,
+    syneos_title_clinical_eligible,
     text_suggests_remote,
     text_suggests_us_only_remote,
 )
 from scraper.nrw_major_fetchers import (  # noqa: E402
     JOB_PATH_RE,
     _sf_listing_page_url,
+    _syneos_collect_listing_links,
+    _syneos_parse_location,
     _ucb_apply_listing_filters,
     _ucb_collect_job_links,
     _workday_gather_listing_links,
@@ -51,6 +58,7 @@ from scraper.nrw_major_fetchers import (  # noqa: E402
     probe_jnj_careers_listing_link_count,
     probe_lanxess_portal_link_count,
     probe_rexx_portal_link_count,
+    probe_syneos_clinical_link_count,
 )
 
 YAML_PATH = ROOT / "input_data" / "nrw_major_employers.yaml"
@@ -73,6 +81,7 @@ def _eligibility_reason(
     *,
     scoped: bool,
     profile: str = "nrw",
+    title: str = "",
 ) -> str:
     blob = f"{location or ''}\n{text or ''}"
     if text_suggests_us_only_remote(blob):
@@ -100,6 +109,17 @@ def _eligibility_reason(
         if location_in_nrw(blob) or location_in_benelux(blob):
             return "hybrid without NRW/Benelux office"
         return "no NRW / Benelux / remote match (e.g. other DE on-site)"
+    if profile == "syneos_clinical_eu":
+        if job_eligible_syneos_clinical_eu(location, text, title=title):
+            return "pass (Syneos clinical EU)"
+        if not syneos_title_clinical_eligible(title):
+            return "not CRA/CTM/clinical ops title"
+        if not syneos_geo_eligible(location, title, text):
+            pref = syneos_country_from_location(location) or "?"
+            return f"geo not in DE/Benelux/EU scope ({pref})"
+        if not job_language_requirements_acceptable(text):
+            return "blocking language requirement"
+        return "Syneos eligibility reject"
     if job_text_eligible(location, text):
         return "pass (remote/hybrid/NRW rules)"
     if "remote" in blob.lower() and not any(
@@ -448,6 +468,93 @@ def diagnose_adhex(row: dict, listing_only: bool) -> None:
     print(f"  eligible jobs returned: {len(jobs)}")
 
 
+def _syneos_listing_links(row: dict, employer: str) -> list[str]:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+        links = _syneos_collect_listing_links(page, row, employer)
+        browser.close()
+    return links
+
+
+def diagnose_syneos_clinical(row: dict, listing_only: bool, sample: int) -> None:
+    name = row["name"]
+    profile = str(row.get("eligibility_profile") or "syneos_clinical_eu")
+    print(f"\n{'='*72}")
+    print(f"{name} [syneos_clinical]  eligibility_profile: {profile}")
+    print(f"  listing URLs: {row.get('syneos_listing_urls')}")
+    links = _syneos_listing_links(row, name)
+    print(f"  job links after merge: {len(links)}")
+    for i, u in enumerate(links[:8], 1):
+        print(f"    {i}. {u}")
+    if len(links) > 8:
+        print(f"    … +{len(links) - 8} more")
+    if not links:
+        print("  → 0 eligible in production = listing found nothing.")
+        return
+    if listing_only:
+        return
+
+    eligible = 0
+    rejected: list[tuple[str, str]] = []
+    breakdown = {"de": 0, "nl": 0, "be": 0, "other_eu": 0, "rejected": 0}
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  playwright not installed — skip detail probe")
+        return
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+        for job_url in links[:sample]:
+            try:
+                page.goto(job_url, wait_until="domcontentloaded", timeout=45000)
+                page.wait_for_timeout(2000)
+                body = page.inner_text("body")[:12000]
+                title = page.locator("h1").first.inner_text(timeout=2000).strip()
+            except Exception as exc:
+                rejected.append((job_url, f"detail fetch failed: {exc}"[:80]))
+                continue
+            loc = _syneos_parse_location(body)
+            if job_eligible_for_employer(row, loc, body, title=title):
+                eligible += 1
+                pref = syneos_country_from_location(loc)
+                if pref == "DEU":
+                    breakdown["de"] += 1
+                elif pref == "NLD":
+                    breakdown["nl"] += 1
+                elif pref == "BEL":
+                    breakdown["be"] += 1
+                elif pref:
+                    breakdown["other_eu"] += 1
+            else:
+                breakdown["rejected"] += 1
+                rejected.append(
+                    (
+                        job_url,
+                        _eligibility_reason(
+                            loc, body, scoped=False, profile=profile, title=title
+                        ),
+                    )
+                )
+        browser.close()
+
+    print(f"  detail sample ({min(sample, len(links))}): eligible={eligible}")
+    print(
+        f"  breakdown: DE={breakdown['de']}, NL={breakdown['nl']}, BE={breakdown['be']}, "
+        f"other_EU={breakdown['other_eu']}, rejected={breakdown['rejected']}"
+    )
+    for url_, reason in rejected[:6]:
+        print(f"    ✗ {reason}")
+        print(f"      {url_[:90]}")
+
+
 def diagnose_api_fallback(row: dict) -> None:
     name = row["name"]
     st = row["source_type"]
@@ -487,6 +594,8 @@ def main() -> None:
             diagnose_dolorgiet(row, args.listing_only)
         elif st == "adhex_hubspot":
             diagnose_adhex(row, args.listing_only)
+        elif st == "syneos_clinical":
+            diagnose_syneos_clinical(row, args.listing_only, args.sample)
         else:
             diagnose_api_fallback(row)
 

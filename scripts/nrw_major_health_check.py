@@ -43,6 +43,7 @@ from scraper.nrw_major_fetchers import (  # noqa: E402
     probe_jnj_careers_listing_link_count,
     probe_lanxess_portal_link_count,
     probe_rexx_portal_link_count,
+    probe_syneos_clinical_link_count,
 )
 import reporter.email_sender  # noqa: E402
 
@@ -70,6 +71,7 @@ MIN_EXPECTED: dict[str, int] = {
     "Klosterfrau": 3,
     "AdhexPharma": 1,
     "Medtronic": 5,
+    "Syneos Health": 8,
 }
 
 # Employers that may legitimately have zero open roles (warn, not fail).
@@ -212,6 +214,12 @@ def check_employer(row: dict) -> CheckResult:
             kw = row.get("adhex_location_keywords") or ["Langenfeld"]
             detail = f"sitemap Langenfeld filter {kw}"
             err = None if n >= 0 else status
+        elif st == "syneos_clinical":
+            status, n = probe_syneos_clinical_link_count(row)
+            detail = "clinical-corporate-careers listings"
+            err = _playwright_unavailable(Exception(status)) if n < 0 and "launch" in status else (
+                None if n >= 0 else status
+            )
         else:
             return CheckResult(name, st, "fail", -1, f"unknown source_type {st!r}")
 

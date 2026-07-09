@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -179,10 +180,177 @@ def job_eligible_nrw_benelux_remote(
     return job_text_eligible_nrw_benelux_remote(location, detail_text)
 
 
+_SYNEOS_PRIORITY_EU = frozenset({"DEU", "NLD", "BEL", "LUX"})
+_SYNEOS_OTHER_EU = frozenset(
+    {
+        "AUT",
+        "ESP",
+        "PRT",
+        "POL",
+        "IRL",
+        "ITA",
+        "CHE",
+        "DNK",
+        "SWE",
+        "FIN",
+        "CZE",
+        "HUN",
+        "ROU",
+        "BGR",
+        "GRC",
+        "SVK",
+        "SVN",
+        "HRV",
+        "LTU",
+        "LVA",
+        "EST",
+        "CYP",
+        "MLT",
+    }
+)
+_SYNEOS_NON_EU = frozenset(
+    {
+        "USA",
+        "AUS",
+        "BRA",
+        "CHN",
+        "MEX",
+        "TWN",
+        "ARG",
+        "IND",
+        "JPN",
+        "KOR",
+        "CAN",
+        "COL",
+        "SGP",
+        "ZAF",
+        "EGY",
+        "SAU",
+        "TUR",
+        "THA",
+        "MYS",
+        "IDN",
+        "PHL",
+        "VNM",
+        "NZL",
+        "ISR",
+    }
+)
+
+
+def syneos_country_from_location(loc: str) -> str | None:
+    """Parse Syneos location code prefix (e.g. DEU-Remote → DEU)."""
+    code = (loc or "").strip().upper()
+    if not code:
+        return None
+    prefix = code.split("-", 1)[0]
+    if len(prefix) == 3 and prefix.isalpha():
+        return prefix
+    return None
+
+
+def syneos_title_clinical_eligible(title: str) -> bool:
+    t = (title or "").strip()
+    if not t:
+        return False
+    low = t.lower()
+    for kw in _cfg().get("syneos_clinical_title_exclude_keywords") or []:
+        if kw and str(kw).lower() in low:
+            return False
+    for kw in _cfg().get("syneos_clinical_title_keywords") or []:
+        if not kw:
+            continue
+        k = str(kw).lower()
+        if k == "cra":
+            if re.search(r"\bcra\b", low):
+                return True
+            continue
+        if k == "ctm":
+            if re.search(r"\bctm\b", low):
+                return True
+            continue
+        if k in low:
+            return True
+    return False
+
+
+def _syneos_qualifications_blob(detail_text: str) -> str:
+    """Prefer Qualifications block over full page (footer mentions United States)."""
+    blob = detail_text or ""
+    m = re.search(
+        r"Qualifications:?\s*(.*?)(?:Additional Information|Summary|Apply for this job|Share this job|$)",
+        blob,
+        re.I | re.S,
+    )
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    m2 = re.search(r"Description\s*(.*?)(?:Qualifications|Additional Information|$)", blob, re.I | re.S)
+    if m2 and m2.group(1).strip():
+        return m2.group(1).strip()
+    return blob[:6000]
+
+
+def job_language_requirements_acceptable(detail_text: str) -> bool:
+    """Reject postings that require non-acceptable working languages."""
+    blob = _syneos_qualifications_blob(detail_text).lower()
+    for phrase in _cfg().get("blocking_job_language_requirements") or []:
+        if phrase and str(phrase).lower() in blob:
+            return False
+    return True
+
+
+def _syneos_blob_suggests_emea(blob: str) -> bool:
+    low = (blob or "").lower()
+    return any(
+        x in low
+        for x in ("emea", "europe", "european union", " eu ", "e.u.")
+    )
+
+
+def syneos_geo_eligible(location: str, title: str, detail_text: str) -> bool:
+    blob = f"{title or ''}\n{location or ''}\n{detail_text or ''}"
+    prefix = syneos_country_from_location(location)
+    if prefix:
+        if prefix in _SYNEOS_NON_EU:
+            return False
+        if prefix in _SYNEOS_PRIORITY_EU or prefix in _SYNEOS_OTHER_EU:
+            return True
+        return False
+    low = blob.lower()
+    for hint in _cfg().get("syneos_geo_title_hints") or []:
+        if hint and str(hint).lower() in low:
+            return True
+    if _syneos_blob_suggests_emea(blob):
+        return True
+    return False
+
+
+def job_eligible_syneos_clinical_eu(
+    location: str,
+    detail_text: str,
+    *,
+    title: str = "",
+    listing_nrw_scoped: bool = False,
+) -> bool:
+    qual = _syneos_qualifications_blob(detail_text)
+    blob = f"{location or ''}\n{qual}"
+    if text_suggests_us_only_remote(blob):
+        return False
+    if listing_nrw_scoped:
+        return syneos_title_clinical_eligible(title)
+    if not syneos_title_clinical_eligible(title):
+        return False
+    if not syneos_geo_eligible(location, title, detail_text):
+        return False
+    return job_language_requirements_acceptable(detail_text)
+
+
 def job_eligible_for_employer(
     company: dict,
     location: str,
     detail_text: str,
+    *,
+    title: str = "",
 ) -> bool:
     """Dispatch eligibility by optional YAML key eligibility_profile (default: nrw)."""
     profile = str(company.get("eligibility_profile") or "nrw").strip().lower()
@@ -190,6 +358,10 @@ def job_eligible_for_employer(
     if profile == "nrw_benelux_remote":
         return job_eligible_nrw_benelux_remote(
             location, detail_text, listing_nrw_scoped=scoped
+        )
+    if profile == "syneos_clinical_eu":
+        return job_eligible_syneos_clinical_eu(
+            location, detail_text, title=title, listing_nrw_scoped=scoped
         )
     return job_eligible_nrw_major(location, detail_text, listing_nrw_scoped=scoped)
 

@@ -10,8 +10,8 @@ Research date: **March 2026**. Context: this project’s company watchlist alrea
 |-------|------|
 | `run_nrw_major_checker.py` | Daily fetch for `input_data/nrw_major_employers.yaml` |
 | `scraper/nrw_major_fetchers.py` | SmartRecruiters, Bayer Eightfold API, SuccessFactors, Workday, UCB, Henkel, J&J careers, rexx portal, Dolorgiet static, Adhex HubSpot |
-| `scripts/nrw_major_health_check.py` | Weekly listing probes + email (17 employers) |
-| `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate; optional `eligibility_profile: nrw_benelux_remote` for Benelux on-site |
+| `scripts/nrw_major_health_check.py` | Weekly listing probes + email (18 employers) |
+| `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate; optional `eligibility_profile` for Benelux (`nrw_benelux_remote`) or Syneos CRA (`syneos_clinical_eu`) |
 | `source = company_nrw_major` | DB rows; third section in email/Telegram reporter (scores + APPLY/review) |
 | Title filter | **Internship / Praktikum / Praktikant** (and whole-word **intern**) are **not stored** — skipped in `run_nrw_major_checker` |
 
@@ -38,6 +38,14 @@ Apontis, Dolorgiet, and AdhexPharma were removed from `companies.yaml` watchlist
 | **Medtronic** | `workday` | `medtronic.wd1` Germany + Belgium `locationCountry` facets + Amsterdam city facet; `eligibility_profile: nrw_benelux_remote` accepts NRW + Benelux on-site/hybrid and DE/EU remote; rejects other DE on-site (e.g. Deggendorf) |
 
 Use `eligibility_profile: nrw_benelux_remote` as the pattern for future majors that should include Benelux offices alongside NRW.
+
+### Added July 2026 — Syneos Health (clinical)
+
+| Employer | `source_type` | Notes |
+|----------|---------------|-------|
+| **Syneos Health** | `syneos_clinical` | `clinical-corporate-careers` Phenom board; hub listings Munich/Amsterdam/Brussels + `?q=CRA`; `eligibility_profile: syneos_clinical_eu` accepts DEU-/NLD-/BEL-Remote CRA/CTM and EU roles when language requirements are DE/EN/ES/PT only |
+
+Location on detail pages uses codes like `DEU-Remote` (home-based Germany) even when the listing facet is Munich.
 
 ---
 

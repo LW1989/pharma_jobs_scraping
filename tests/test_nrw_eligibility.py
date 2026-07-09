@@ -11,6 +11,8 @@ from scraper.nrw_eligibility import (  # noqa: E402
     job_eligible_for_employer,
     job_eligible_nrw_benelux_remote,
     job_eligible_nrw_major,
+    job_eligible_syneos_clinical_eu,
+    job_language_requirements_acceptable,
     job_text_eligible,
     job_text_eligible_nrw_benelux_remote,
     listing_row_worth_detail_fetch,
@@ -239,4 +241,50 @@ def test_job_eligible_for_employer_profile():
     )
     assert not job_eligible_for_employer(
         evonik, "Brussels, Belgium", "On-site sales role."
+    )
+
+
+def test_syneos_deu_remote_cra_german():
+    assert job_eligible_syneos_clinical_eu(
+        "DEU-Remote",
+        "Qualifications:\n- Fluency in German\n- GCP knowledge",
+        title="Clinical Research Associate (CRA) Germany",
+    )
+
+
+def test_syneos_nld_remote_dutch_blocked():
+    assert not job_eligible_syneos_clinical_eu(
+        "NLD-Remote",
+        "Qualifications:\n- Fluency in Dutch\n- Fluent English",
+        title="CRA Netherlands",
+    )
+
+
+def test_syneos_aus_remote_rejected():
+    assert not job_eligible_syneos_clinical_eu(
+        "AUS-Remote",
+        "Remote monitoring role in Australia.",
+        title="CRA II/Snr CRA",
+    )
+
+
+def test_syneos_ctm_germany_pass():
+    assert job_eligible_syneos_clinical_eu(
+        "DEU-Remote",
+        "Clinical Trial Manager for Germany. English required.",
+        title="Clinical Trial Manager Germany",
+    )
+
+
+def test_syneos_biostatistician_rejected():
+    assert not job_eligible_syneos_clinical_eu(
+        "NLD-Remote",
+        "Principal Biostatistician role. English required.",
+        title="Principal Biostatistician Netherlands",
+    )
+
+
+def test_job_language_dutch_blocked():
+    assert not job_language_requirements_acceptable(
+        "Must have fluency in Dutch and English."
     )

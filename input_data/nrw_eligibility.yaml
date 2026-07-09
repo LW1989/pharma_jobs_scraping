@@ -384,3 +384,78 @@ benelux_location_keywords:
   - Belux
   - Luxembourg
   - Luxemburg
+
+# Syneos clinical board: CRA/CTM title gate (case-insensitive substring).
+syneos_clinical_title_keywords:
+  - Clinical Research Associate
+  - Site Monitor
+  - Clinical Monitor
+  - Monitoring Associate
+  - Clinical Trial Manager
+  - Clinical Study Manager
+  - Study Start Up
+  - Study Startup
+  - Site Start Up
+  - Site Startup
+  - CRA
+  - CTM
+  - aCTM
+  - FSP
+
+syneos_clinical_title_exclude_keywords:
+  - Biostatistician
+  - Statistician
+  - Medical Writer
+  - Medical Writing
+  - Data Scientist
+  - Software Engineer
+  - Full Stack
+
+syneos_geo_title_hints:
+  - Germany
+  - Deutschland
+  - Munich
+  - München
+  - Berlin
+  - Hamburg
+  - Amsterdam
+  - Netherlands
+  - Nederland
+  - Belgium
+  - Brussels
+  - Benelux
+  - EMEA
+  - Europe
+  - European
+
+acceptable_job_language_signals:
+  - fluent in german
+  - fluency in german
+  - german and english
+  - english and german
+  - deutsch
+  - german
+  - english
+  - spanish
+  - portuguese
+  - español
+  - português
+  - portugues
+
+blocking_job_language_requirements:
+  - fluent in dutch
+  - fluency in dutch
+  - native dutch
+  - nederlands
+  - fluent in french
+  - fluency in french
+  - native french
+  - français
+  - francais
+  - mandarin
+  - cantonese
+  - japanese
+  - korean
+  - italian
+  - local language of the country
+  - native language of the country

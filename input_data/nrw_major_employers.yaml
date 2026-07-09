@@ -145,3 +145,18 @@ employers:
       - https://medtronic.wd1.myworkdayjobs.com/en-US/MedtronicCareers?locations=729c1e621ebc1001571819ceb21f0000
     workday_max_list_jobs: 150
     workday_max_listing_pages: 10
+
+  # Clinical Phenom board; DEU-/NLD-/BEL-Remote CRA/CTM + EU language gate
+  - name: Syneos Health
+    source_type: syneos_clinical
+    listing_nrw_scoped: false
+    eligibility_profile: syneos_clinical_eu
+    syneos_listing_urls:
+      - https://www.syneoshealth.com/clinical-corporate-careers/search/jobs/in/munich
+      - https://www.syneoshealth.com/clinical-corporate-careers/search/jobs/in/amsterdam
+      - https://www.syneoshealth.com/clinical-corporate-careers/search/jobs/in/brussels
+    syneos_extra_urls:
+      - https://www.syneoshealth.com/clinical-corporate-careers/search/jobs?q=CRA
+    syneos_max_list_jobs: 120
+    syneos_max_listing_pages: 8
+    max_jobs: 80

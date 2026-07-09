@@ -40,6 +40,10 @@ HENKEL_BABIEL_API = (
 LANXESS_JOB_RE = re.compile(
     r"https://career\.lanxess\.com/us/en/job/\d+/[^\"'\s<>]+", re.I
 )
+SYNEOS_JOB_PATH_RE = re.compile(
+    r"/clinical-corporate-careers/jobs/(\d+)-[a-z0-9][a-z0-9\-]*", re.I
+)
+SYNEOS_BASE = "https://www.syneoshealth.com"
 UCB_JOB_RE = re.compile(r"https://careers\.ucb\.com/global/en/job/\d+/[^\"'\s<>]+", re.I)
 
 
@@ -1388,6 +1392,180 @@ def fetch_adhex_hubspot(company: dict) -> list[dict]:
     return jobs
 
 
+_SYNEOS_NEXT_SELECTORS = (
+    'button[aria-label*="next" i]',
+    'a[aria-label*="next" i]',
+    'button:has-text("Next")',
+)
+
+
+def _syneos_job_id_from_url(url: str) -> str:
+    m = re.search(r"/jobs/(\d+)-", url)
+    return m.group(1) if m else url
+
+
+def _syneos_extract_listing_links(html: str) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for m in SYNEOS_JOB_PATH_RE.finditer(html):
+        jid = m.group(1)
+        if jid in seen:
+            continue
+        seen.add(jid)
+        ordered.append(f"{SYNEOS_BASE}{m.group(0)}")
+    return ordered
+
+
+def _syneos_click_next(page) -> bool:
+    for sel in _SYNEOS_NEXT_SELECTORS:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() == 0:
+                continue
+            if loc.is_disabled():
+                return False
+            if (loc.get_attribute("aria-disabled") or "").lower() == "true":
+                return False
+            loc.click(timeout=5000)
+            page.wait_for_timeout(2500)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _syneos_collect_listing_links(page, company: dict, employer: str) -> list[str]:
+    max_list = int(company.get("syneos_max_list_jobs", 120))
+    max_pages = int(company.get("syneos_max_listing_pages", 8))
+    listing_urls: list[str] = list(company.get("syneos_listing_urls") or [])
+    for extra in company.get("syneos_extra_urls") or []:
+        if extra and extra not in listing_urls:
+            listing_urls.append(extra)
+
+    seen_ids: set[str] = set()
+    ordered: list[str] = []
+    for list_url in listing_urls:
+        page.goto(list_url, wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_timeout(6000)
+        for pg in range(1, max_pages + 1):
+            batch = _syneos_extract_listing_links(page.content())
+            new = []
+            for u in batch:
+                jid = _syneos_job_id_from_url(u)
+                if jid not in seen_ids:
+                    seen_ids.add(jid)
+                    ordered.append(u)
+                    new.append(u)
+            logger.info(
+                "%s syneos listing %s page %d: +%d new (total %d)",
+                employer,
+                list_url[:60],
+                pg,
+                len(new),
+                len(ordered),
+            )
+            if len(ordered) >= max_list:
+                return ordered[:max_list]
+            if pg >= max_pages:
+                break
+            if not new and pg > 1:
+                break
+            if not _syneos_click_next(page):
+                break
+    return ordered[:max_list]
+
+
+def _syneos_parse_location(detail_text: str) -> str:
+    m = re.search(r"Location:\s*([^\n]+)", detail_text or "", re.I)
+    return m.group(1).strip() if m else ""
+
+
+def _syneos_parse_title(page, detail_text: str) -> str:
+    try:
+        h1 = page.locator("h1").first
+        if h1.count():
+            t = h1.inner_text(timeout=2000).strip()
+            if t:
+                return t
+    except Exception:
+        pass
+    for line in (detail_text or "").split("\n")[:8]:
+        line = line.strip()
+        if line and line.lower() not in ("description", "qualifications"):
+            return line
+    try:
+        return (page.title() or "").split(" in ")[0].strip()
+    except Exception:
+        return ""
+
+
+def probe_syneos_clinical_link_count(company: dict) -> tuple[str, int]:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "playwright not installed", -1
+    employer = company.get("name", "Syneos")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+            links = _syneos_collect_listing_links(page, company, employer)
+            browser.close()
+            return "ok", len(links)
+        except Exception as exc:
+            try:
+                browser.close()
+            except Exception:
+                pass
+            return str(exc)[:120], -1
+
+
+def fetch_syneos_clinical(company: dict) -> list[dict]:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.warning("playwright not installed — skip %s", company.get("name"))
+        return []
+
+    employer = company["name"]
+    max_jobs = int(company.get("max_jobs", company.get("syneos_max_list_jobs", 120)))
+    jobs: list[dict] = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(user_agent=config.HEADERS["User-Agent"])
+            page.set_default_timeout(90000)
+            links = _syneos_collect_listing_links(page, company, employer)
+            logger.info("%s syneos: %d listing link(s)", employer, len(links))
+            for job_url in links:
+                if len(jobs) >= max_jobs:
+                    break
+                try:
+                    page.goto(job_url, wait_until="domcontentloaded", timeout=45000)
+                    page.wait_for_timeout(2000)
+                    body = page.inner_text("body")[:12000]
+                except Exception as exc:
+                    logger.debug("syneos job %s: %s", job_url, exc)
+                    continue
+                loc = _syneos_parse_location(body)
+                title = _syneos_parse_title(page, body)
+                if not job_eligible_for_employer(
+                    company, loc, body, title=title
+                ):
+                    continue
+                jobs.append(_build_row(employer, title, job_url, loc[:200], body))
+            logger.info("%s syneos: %d eligible job(s)", employer, len(jobs))
+            browser.close()
+        except Exception as exc:
+            logger.warning("Syneos %s: %s", employer, exc)
+            try:
+                browser.close()
+            except Exception:
+                pass
+    return jobs
+
+
 def fetch_jobs_for_employer(company: dict) -> list[dict]:
     st = company.get("source_type", "")
     if st == "smartrecruiters":
@@ -1412,5 +1590,7 @@ def fetch_jobs_for_employer(company: dict) -> list[dict]:
         return fetch_dolorgiet_static(company)
     if st == "adhex_hubspot":
         return fetch_adhex_hubspot(company)
+    if st == "syneos_clinical":
+        return fetch_syneos_clinical(company)
     logger.warning("Unknown NRW employer source_type: %s", st)
     return []
