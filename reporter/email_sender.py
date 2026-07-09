@@ -23,27 +23,35 @@ def send(subject: str, html_body: str) -> None:
         RuntimeError: if SMTP credentials are not configured.
         smtplib.SMTPException: on any send failure (caller decides whether to abort).
     """
+    recipients = [r.strip() for r in config.REPORT_TO.split(",") if r.strip()]
+    if not recipients:
+        raise RuntimeError("REPORT_TO is empty — add at least one recipient email.")
+    send_to(recipients, subject, html_body)
+
+
+def send_to(recipients: list[str], subject: str, html_body: str) -> None:
+    """Send HTML email to an explicit recipient list (not config.REPORT_TO)."""
     if not config.SMTP_USER or not config.SMTP_PASSWORD:
         raise RuntimeError(
             "SMTP_USER and SMTP_PASSWORD must be set in .env to send email reports."
         )
 
-    recipients = [r.strip() for r in config.REPORT_TO.split(",") if r.strip()]
-    if not recipients:
-        raise RuntimeError("REPORT_TO is empty — add at least one recipient email.")
+    to = [r.strip() for r in recipients if r.strip()]
+    if not to:
+        raise RuntimeError("recipients list is empty.")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = config.SMTP_USER
-    msg["To"] = ", ".join(recipients)
+    msg["To"] = ", ".join(to)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    logger.info("Sending email to %s via %s:%s …", recipients, config.SMTP_HOST, config.SMTP_PORT)
+    logger.info("Sending email to %s via %s:%s …", to, config.SMTP_HOST, config.SMTP_PORT)
 
     with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as server:
         server.ehlo()
         server.starttls()
         server.login(config.SMTP_USER, config.SMTP_PASSWORD)
-        server.sendmail(config.SMTP_USER, recipients, msg.as_string())
+        server.sendmail(config.SMTP_USER, to, msg.as_string())
 
     logger.info("Email sent successfully.")

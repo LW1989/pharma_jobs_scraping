@@ -48,5 +48,5 @@ _test_email.html
 start_here/_archive/
 not used md files/
 
-# Google service account key — contains private credentials, never commit
-input_data/google_credentials.json
+# Local scraper experiments (PoC scripts, browser profiles, saved HTML)
+scratch_*/
