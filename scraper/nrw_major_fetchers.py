@@ -44,6 +44,11 @@ SYNEOS_JOB_PATH_RE = re.compile(
     r"/clinical-corporate-careers/jobs/(\d+)-[a-z0-9][a-z0-9\-]*", re.I
 )
 SYNEOS_BASE = "https://www.syneoshealth.com"
+FORTREA_PHENOM_BASE = "https://careers.fortrea.com/us/en"
+FORTREA_CXS_JOBS = (
+    "https://fortrea.wd1.myworkdayjobs.com/wday/cxs/fortrea/Fortrea/jobs"
+)
+FORTREA_CXS_JOB = "https://fortrea.wd1.myworkdayjobs.com/wday/cxs/fortrea/Fortrea"
 UCB_JOB_RE = re.compile(r"https://careers\.ucb\.com/global/en/job/\d+/[^\"'\s<>]+", re.I)
 
 
@@ -1566,6 +1571,170 @@ def fetch_syneos_clinical(company: dict) -> list[dict]:
     return jobs
 
 
+def _fortrea_job_id_from_path(external_path: str) -> str:
+    m = re.search(r"_(\d+)$", external_path or "")
+    return m.group(1) if m else ""
+
+
+def _fortrea_phenom_url(external_path: str) -> str:
+    jid = _fortrea_job_id_from_path(external_path)
+    if not jid:
+        return ""
+    m = re.search(r"/job/[^/]+/(.+)$", external_path or "")
+    if not m:
+        return f"{FORTREA_PHENOM_BASE}/job/{jid}"
+    slug = re.sub(r"_\d+$", "", m.group(1)).lower()
+    return f"{FORTREA_PHENOM_BASE}/job/{jid}/{slug}"
+
+
+def _fortrea_html_to_text(html: str) -> str:
+    soup = BeautifulSoup(html or "", "lxml")
+    for tag in soup(["script", "style", "nav", "footer"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
+
+
+def _fortrea_location_from_detail(info: dict) -> str:
+    loc = (info.get("location") or "").strip()
+    country = info.get("country")
+    if isinstance(country, dict):
+        country_name = (country.get("descriptor") or "").strip()
+    elif country:
+        country_name = str(country).strip()
+    else:
+        country_name = ""
+    if loc and country_name and country_name.lower() not in loc.lower():
+        return f"{loc}, {country_name}"
+    return loc or country_name or (info.get("locationsText") or "")
+
+
+def _fortrea_cxs_search(
+    search_text: str,
+    *,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list[dict], int]:
+    payload = {
+        "appliedFacets": {},
+        "limit": limit,
+        "offset": offset,
+        "searchText": search_text or "",
+    }
+    resp = _SESSION.post(
+        FORTREA_CXS_JOBS,
+        json=payload,
+        timeout=config.REQUEST_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    total = int(data.get("total") or 0)
+    return list(data.get("jobPostings") or []), total
+
+
+def _fortrea_cxs_detail(external_path: str) -> dict:
+    path = external_path if external_path.startswith("/") else f"/{external_path}"
+    resp = _SESSION.get(
+        f"{FORTREA_CXS_JOB}{path}",
+        timeout=config.REQUEST_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    return resp.json().get("jobPostingInfo") or {}
+
+
+def _fortrea_collect_job_refs(company: dict, employer: str) -> list[dict]:
+    max_list = int(company.get("fortrea_max_list_jobs", 150))
+    page_size = int(company.get("fortrea_page_size", 20))
+    queries: list[str] = list(
+        company.get("fortrea_search_queries") or ["Munich", "Germany", "CRA"]
+    )
+
+    seen_paths: set[str] = set()
+    ordered: list[dict] = []
+    for query in queries:
+        offset = 0
+        total = 0
+        while offset < max_list:
+            try:
+                batch, total = _fortrea_cxs_search(
+                    query, offset=offset, limit=page_size
+                )
+            except Exception as exc:
+                logger.warning("%s fortrea search %r: %s", employer, query, exc)
+                break
+            if not batch:
+                break
+            new = 0
+            for posting in batch:
+                path = (posting.get("externalPath") or "").strip()
+                if not path or path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                ordered.append(posting)
+                new += 1
+            logger.info(
+                "%s fortrea search %r offset %d: +%d new (total %d, remote total %d)",
+                employer,
+                query,
+                offset,
+                new,
+                len(ordered),
+                total,
+            )
+            if len(ordered) >= max_list:
+                return ordered[:max_list]
+            offset += page_size
+            if offset >= total:
+                break
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+    return ordered[:max_list]
+
+
+def probe_fortrea_clinical_link_count(company: dict) -> tuple[str, int]:
+    employer = company.get("name", "Fortrea")
+    try:
+        refs = _fortrea_collect_job_refs(company, employer)
+        return "ok", len(refs)
+    except Exception as exc:
+        return str(exc)[:120], -1
+
+
+def fetch_fortrea_clinical(company: dict) -> list[dict]:
+    employer = company["name"]
+    max_jobs = int(company.get("max_jobs", company.get("fortrea_max_list_jobs", 150)))
+    jobs: list[dict] = []
+
+    try:
+        refs = _fortrea_collect_job_refs(company, employer)
+        logger.info("%s fortrea: %d listing ref(s)", employer, len(refs))
+        for posting in refs:
+            if len(jobs) >= max_jobs:
+                break
+            external_path = (posting.get("externalPath") or "").strip()
+            if not external_path:
+                continue
+            try:
+                info = _fortrea_cxs_detail(external_path)
+            except Exception as exc:
+                logger.debug("fortrea job %s: %s", external_path, exc)
+                continue
+            title = (info.get("title") or posting.get("title") or "").strip()
+            loc = _fortrea_location_from_detail(info)
+            body = _fortrea_html_to_text(info.get("jobDescription") or "")[:12000]
+            job_url = _fortrea_phenom_url(external_path)
+            if not job_url:
+                continue
+            if not job_eligible_for_employer(
+                company, loc, body, title=title
+            ):
+                continue
+            jobs.append(_build_row(employer, title, job_url, loc[:200], body))
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+        logger.info("%s fortrea: %d eligible job(s)", employer, len(jobs))
+    except Exception as exc:
+        logger.warning("Fortrea %s: %s", employer, exc)
+    return jobs
+
+
 def fetch_jobs_for_employer(company: dict) -> list[dict]:
     st = company.get("source_type", "")
     if st == "smartrecruiters":
@@ -1592,5 +1761,7 @@ def fetch_jobs_for_employer(company: dict) -> list[dict]:
         return fetch_adhex_hubspot(company)
     if st == "syneos_clinical":
         return fetch_syneos_clinical(company)
+    if st == "fortrea_clinical":
+        return fetch_fortrea_clinical(company)
     logger.warning("Unknown NRW employer source_type: %s", st)
     return []

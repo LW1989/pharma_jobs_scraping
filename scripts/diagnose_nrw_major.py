@@ -59,6 +59,12 @@ from scraper.nrw_major_fetchers import (  # noqa: E402
     probe_lanxess_portal_link_count,
     probe_rexx_portal_link_count,
     probe_syneos_clinical_link_count,
+    probe_fortrea_clinical_link_count,
+    _fortrea_collect_job_refs,
+    _fortrea_cxs_detail,
+    _fortrea_html_to_text,
+    _fortrea_location_from_detail,
+    _fortrea_phenom_url,
 )
 
 YAML_PATH = ROOT / "input_data" / "nrw_major_employers.yaml"
@@ -555,6 +561,88 @@ def diagnose_syneos_clinical(row: dict, listing_only: bool, sample: int) -> None
         print(f"      {url_[:90]}")
 
 
+def _fortrea_country_bucket(location: str, title: str, body: str) -> str:
+    pref = syneos_country_from_location(location)
+    if pref == "DEU":
+        return "de"
+    if pref == "NLD":
+        return "nl"
+    if pref == "BEL":
+        return "be"
+    if pref:
+        return "other_eu"
+    blob = f"{location}\n{title}\n{body}".lower()
+    if "germany" in blob or "munich" in blob or "deutsch" in blob:
+        return "de"
+    if "netherlands" in blob or "nederland" in blob or "leiden" in blob:
+        return "nl"
+    if "belgium" in blob or "brussels" in blob:
+        return "be"
+    return "other_eu"
+
+
+def diagnose_fortrea_clinical(row: dict, listing_only: bool, sample: int) -> None:
+    name = row["name"]
+    profile = str(row.get("eligibility_profile") or "syneos_clinical_eu")
+    print(f"\n{'='*72}")
+    print(f"{name} [fortrea_clinical]  eligibility_profile: {profile}")
+    print(f"  search queries: {row.get('fortrea_search_queries')}")
+    refs = _fortrea_collect_job_refs(row, name)
+    links = [
+        _fortrea_phenom_url((p.get("externalPath") or "").strip())
+        for p in refs
+        if p.get("externalPath")
+    ]
+    print(f"  job refs after merge: {len(links)}")
+    for i, u in enumerate(links[:8], 1):
+        print(f"    {i}. {u}")
+    if len(links) > 8:
+        print(f"    … +{len(links) - 8} more")
+    if not links:
+        print("  → 0 eligible in production = listing found nothing.")
+        return
+    if listing_only:
+        return
+
+    eligible = 0
+    rejected: list[tuple[str, str]] = []
+    breakdown = {"de": 0, "nl": 0, "be": 0, "other_eu": 0, "rejected": 0}
+    for posting in refs[:sample]:
+        external_path = (posting.get("externalPath") or "").strip()
+        job_url = _fortrea_phenom_url(external_path)
+        try:
+            info = _fortrea_cxs_detail(external_path)
+        except Exception as exc:
+            rejected.append((job_url, f"detail fetch failed: {exc}"[:80]))
+            continue
+        title = (info.get("title") or posting.get("title") or "").strip()
+        loc = _fortrea_location_from_detail(info)
+        body = _fortrea_html_to_text(info.get("jobDescription") or "")[:12000]
+        if job_eligible_for_employer(row, loc, body, title=title):
+            eligible += 1
+            bucket = _fortrea_country_bucket(loc, title, body)
+            breakdown[bucket] += 1
+        else:
+            breakdown["rejected"] += 1
+            rejected.append(
+                (
+                    job_url,
+                    _eligibility_reason(
+                        loc, body, scoped=False, profile=profile, title=title
+                    ),
+                )
+            )
+
+    print(f"  detail sample ({min(sample, len(links))}): eligible={eligible}")
+    print(
+        f"  breakdown: DE={breakdown['de']}, NL={breakdown['nl']}, BE={breakdown['be']}, "
+        f"other_EU={breakdown['other_eu']}, rejected={breakdown['rejected']}"
+    )
+    for url_, reason in rejected[:6]:
+        print(f"    ✗ {reason}")
+        print(f"      {url_[:90]}")
+
+
 def diagnose_api_fallback(row: dict) -> None:
     name = row["name"]
     st = row["source_type"]
@@ -596,6 +684,8 @@ def main() -> None:
             diagnose_adhex(row, args.listing_only)
         elif st == "syneos_clinical":
             diagnose_syneos_clinical(row, args.listing_only, args.sample)
+        elif st == "fortrea_clinical":
+            diagnose_fortrea_clinical(row, args.listing_only, args.sample)
         else:
             diagnose_api_fallback(row)
 

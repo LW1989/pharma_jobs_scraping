@@ -10,8 +10,8 @@ Research date: **March 2026**. Context: this project’s company watchlist alrea
 |-------|------|
 | `run_nrw_major_checker.py` | Daily fetch for `input_data/nrw_major_employers.yaml` |
 | `scraper/nrw_major_fetchers.py` | SmartRecruiters, Bayer Eightfold API, SuccessFactors, Workday, UCB, Henkel, J&J careers, rexx portal, Dolorgiet static, Adhex HubSpot |
-| `scripts/nrw_major_health_check.py` | Weekly listing probes + email (18 employers) |
-| `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate; optional `eligibility_profile` for Benelux (`nrw_benelux_remote`) or Syneos CRA (`syneos_clinical_eu`) |
+| `scripts/nrw_major_health_check.py` | Weekly listing probes + email (19 employers) |
+| `scraper/nrw_eligibility.py` + `input_data/nrw_eligibility.yaml` | Remote (DE/EU) or hybrid-in-NRW gate; optional `eligibility_profile` for Benelux (`nrw_benelux_remote`), Syneos/Fortrea CRA (`syneos_clinical_eu`) |
 | `source = company_nrw_major` | DB rows; third section in email/Telegram reporter (scores + APPLY/review) |
 | Title filter | **Internship / Praktikum / Praktikant** (and whole-word **intern**) are **not stored** — skipped in `run_nrw_major_checker` |
 
@@ -46,6 +46,14 @@ Use `eligibility_profile: nrw_benelux_remote` as the pattern for future majors t
 | **Syneos Health** | `syneos_clinical` | `clinical-corporate-careers` Phenom board; hub listings Munich/Amsterdam/Brussels + `?q=CRA`; `eligibility_profile: syneos_clinical_eu` accepts DEU-/NLD-/BEL-Remote CRA/CTM and EU roles when language requirements are DE/EN/ES/PT only |
 
 Location on detail pages uses codes like `DEU-Remote` (home-based Germany) even when the listing facet is Munich.
+
+### Added July 2026 — Fortrea (clinical)
+
+| Employer | `source_type` | Notes |
+|----------|---------------|-------|
+| **Fortrea** | `fortrea_clinical` | [careers.fortrea.com](https://careers.fortrea.com/us/en/) Phenom front-end over Workday CXS; HTTP listing via `searchText` (Munich, Germany, CRA); `eligibility_profile: syneos_clinical_eu` for DE/Benelux/EU CRA/CTM with DE/EN/ES/PT language gate |
+
+Detail location uses city + country (e.g. `Munich, Germany`) rather than Syneos-style `DEU-Remote` codes. No Playwright required.
 
 ---
 

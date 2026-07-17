@@ -288,3 +288,27 @@ def test_job_language_dutch_blocked():
     assert not job_language_requirements_acceptable(
         "Must have fluency in Dutch and English."
     )
+
+
+def test_fortrea_munich_cra_german():
+    assert job_eligible_syneos_clinical_eu(
+        "Munich, Germany",
+        "Qualifications:\n- Fluency in German\n- GCP knowledge",
+        title="Clinical Research Associate (CRA) Germany",
+    )
+
+
+def test_fortrea_munich_cra_dutch_blocked():
+    assert not job_eligible_syneos_clinical_eu(
+        "Munich, Germany",
+        "Qualifications:\n- Fluency in Dutch\n- Fluent English",
+        title="CRA Germany",
+    )
+
+
+def test_fortrea_durham_us_rejected():
+    assert not job_eligible_syneos_clinical_eu(
+        "Durham",
+        "On-site role in Durham, North Carolina, United States.",
+        title="CRA II",
+    )

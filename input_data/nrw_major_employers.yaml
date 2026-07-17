@@ -160,3 +160,15 @@ employers:
     syneos_max_list_jobs: 120
     syneos_max_listing_pages: 8
     max_jobs: 80
+
+  # Phenom front-end + Workday CXS; DE/Benelux/EU CRA/CTM + language gate (same as Syneos)
+  - name: Fortrea
+    source_type: fortrea_clinical
+    listing_nrw_scoped: false
+    eligibility_profile: syneos_clinical_eu
+    fortrea_search_queries:
+      - Munich
+      - Germany
+      - CRA
+    fortrea_max_list_jobs: 150
+    max_jobs: 30
