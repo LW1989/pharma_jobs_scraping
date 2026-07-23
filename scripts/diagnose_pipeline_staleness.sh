@@ -151,3 +151,50 @@ echo ""
 echo "========== 12. ENV FLAGS (reporter / evaluator) =========="
 grep -E '^(REPORTER_DRY_RUN|EVALUATOR_MAX_JOBS|OPENAI_API_KEY)=' .env 2>/dev/null \
   | sed 's/OPENAI_API_KEY=.*/OPENAI_API_KEY=***set***/' || echo "(no .env flags found)"
+
+echo ""
+echo "========== 13. ACTIVE JOB COUNT BY SOURCE (the email footer uses this pool) =========="
+$PSQL -c "
+SELECT COUNT(*) AS evaluated_active_pool
+FROM jobs WHERE evaluated AND job_active;
+"
+
+echo ""
+echo "========== 14. CHURN: jobs gone from listings but STILL ACTIVE (30-day grace) =========="
+$PSQL -c "
+SELECT source, employer, COUNT(*) AS stale_active,
+       MIN(last_seen) AS oldest_last_seen
+FROM jobs
+WHERE job_active AND last_seen < CURRENT_DATE - 3
+GROUP BY source, employer
+HAVING COUNT(*) > 0
+ORDER BY stale_active DESC
+LIMIT 25;
+"
+
+echo ""
+echo "========== 15. CHURN: duplicate titles (URL change => new job_id, old row lingers) =========="
+$PSQL -c "
+SELECT employer, LEFT(title, 48) AS title, COUNT(*) AS rows,
+       SUM(CASE WHEN job_active THEN 1 ELSE 0 END) AS active
+FROM jobs
+WHERE source IN ('company_nrw_major', 'company_direct')
+GROUP BY employer, LEFT(title, 48)
+HAVING COUNT(*) > 1
+ORDER BY rows DESC
+LIMIT 20;
+"
+
+echo ""
+echo "========== 16. LIVE FETCH vs DB (run on server; no DB writes) =========="
+echo "  .venv/bin/python scripts/diagnose_pipeline_churn.py"
+echo "  Shows per-employer: live fetch count, NEW vs DB, ACTIVE-not-in-live (removals hidden up to 30d)"
+
+echo ""
+echo "========== 17. PHARMIWEB STATUS =========="
+$PSQL -c "
+SELECT job_active, COUNT(*), MAX(last_seen), MIN(first_seen)
+FROM jobs WHERE source = 'pharmiweb' OR source IS NULL
+GROUP BY job_active;
+"
+echo "  (PharmiWeb.com shut down — run_scraper.py returns 0 jobs; site shows 'Thank you' closure page)"

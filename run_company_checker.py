@@ -7,9 +7,9 @@ Workflow:
   3. For each company, fetch open job listings from its career page.
   4. Insert any new jobs (evaluated=FALSE — run_evaluator.py scores them next).
   5. Mark re-seen jobs as active (refresh last_seen).
-  6. Age-based deactivation: mark individual job listings that haven't been
-     seen for 30+ days as inactive. Companies themselves are never deactivated.
-  7. Log a summary.
+  6. Delist jobs removed from the career page (per company, on successful fetch).
+  7. Age-based deactivation: listings not refreshed for 3+ days (failed scrapes).
+  8. Log a summary.
 
 Usage:
     python run_company_checker.py
@@ -27,7 +27,12 @@ from pathlib import Path
 import yaml
 
 from scraper import config
-from scraper.db import get_cursor, insert_job, mark_jobs_active, mark_jobs_inactive
+from scraper.db import (
+    deactivate_delisted_for_employer,
+    get_cursor,
+    insert_job,
+    mark_jobs_active,
+)
 from scraper.company_scraper import fetch_jobs
 
 logging.basicConfig(
@@ -40,7 +45,8 @@ logger = logging.getLogger("run_company_checker")
 
 ROOT = Path(__file__).parent
 COMPANIES_PATH = ROOT / "input_data" / "companies.yaml"
-INACTIVE_AFTER_DAYS = 30
+INACTIVE_AFTER_DAYS = 3
+SOURCE = "company_direct"
 
 
 def _load_companies() -> list[dict]:
@@ -99,6 +105,7 @@ def main() -> None:
 
     total_new = 0
     total_seen = 0
+    total_delisted = 0
     total_failed = 0
 
     # Step 3+4+5 — per-company fetch, insert new, mark seen
@@ -132,24 +139,33 @@ def main() -> None:
             mark_jobs_active(seen_ids)
             total_seen += len(seen_ids)
 
+        delisted = deactivate_delisted_for_employer(SOURCE, name, seen_ids)
+        if delisted:
+            logger.info("  -%d delisted (no longer on career page)", delisted)
+            total_delisted += delisted
+
         time.sleep(config.REQUEST_DELAY_SECONDS)
 
-    # Step 6 — age-based deactivation of stale job listings
+    # Step 7 — safety net for companies whose scrape failed (stale last_seen)
     deactivated = _deactivate_stale_company_jobs()
     if deactivated:
-        logger.info("Deactivated %d stale company job listing(s) (not seen in %d days)",
-                    deactivated, INACTIVE_AFTER_DAYS)
+        logger.info(
+            "Deactivated %d stale company job listing(s) (not seen in %d days)",
+            deactivated,
+            INACTIVE_AFTER_DAYS,
+        )
 
-    # Step 7 — summary
+    # Step 8 — summary
     elapsed = (datetime.now() - start).total_seconds()
     logger.info("-" * 60)
     logger.info("Run complete in %.1f seconds.", elapsed)
     logger.info(
         "Summary: %d companies checked  |  +%d new jobs  |  "
-        "%d re-seen  |  -%d deactivated  |  %d failed",
+        "%d re-seen  |  -%d delisted  |  -%d stale  |  %d failed",
         len([c for c in companies if c.get("source_type") != "skip"]),
         total_new,
         total_seen,
+        total_delisted,
         deactivated,
         total_failed,
     )

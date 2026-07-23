@@ -173,19 +173,24 @@ def mark_as_sent(job_ids: list[str]) -> None:
     logger.info("Marked %d job(s) as sent.", len(job_ids))
 
 
-def count_evaluated_today() -> dict:
-    """Return summary counts useful for the report header."""
+def count_digest_footer_stats() -> dict:
+    """Counts for the email footer (digest size is added by run_reporter)."""
     sql = """
         SELECT
-            COUNT(*)                                         AS total_evaluated,
-            COUNT(*) FILTER (WHERE should_apply = TRUE)     AS total_apply,
-            COUNT(*) FILTER (WHERE should_apply = FALSE
-                               AND passed_prescreening = TRUE) AS total_review
+            COUNT(*) FILTER (
+                WHERE job_active = TRUE AND evaluated = TRUE
+            ) AS active_in_db,
+            COUNT(*) FILTER (
+                WHERE job_active = TRUE AND first_seen = CURRENT_DATE
+            ) AS new_today
         FROM jobs
-        WHERE evaluated = TRUE
-          AND job_active = TRUE
     """
     with get_cursor() as cur:
         cur.execute(sql)
         row = cur.fetchone()
-        return dict(row) if row else {"total_evaluated": 0, "total_apply": 0, "total_review": 0}
+        if not row:
+            return {"active_in_db": 0, "new_today": 0}
+        return {
+            "active_in_db": int(row["active_in_db"] or 0),
+            "new_today": int(row["new_today"] or 0),
+        }

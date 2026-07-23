@@ -151,7 +151,15 @@ def build_email_html(
         min_score:          The minimum score threshold (for the note text).
     """
     today = _date.today().strftime("%-d %b %Y")
-    total = (stats or {}).get("total_evaluated", len(jobs))
+    digest_count = (stats or {}).get("digest_count")
+    if digest_count is None:
+        digest_count = (
+            len(jobs)
+            + len(company_jobs or [])
+            + len(nrw_major_jobs or [])
+        )
+    new_today = int((stats or {}).get("new_today", 0))
+    active_in_db = int((stats or {}).get("active_in_db", 0))
     apply_count = sum(1 for j in jobs if j.get("should_apply"))
     review_count = len(jobs) - apply_count
 
@@ -228,7 +236,8 @@ def build_email_html(
   {company_section}
   {nrw_section}
   <div class="footer">
-    Evaluated {total} active jobs &nbsp;&middot;&nbsp; {today}
+    {digest_count} in this digest &nbsp;&middot;&nbsp; {new_today} new today
+    &nbsp;&middot;&nbsp; {active_in_db} active in DB &nbsp;&middot;&nbsp; {today}
     &nbsp;&middot;&nbsp; PharmaJobScraper
   </div>
 </div>

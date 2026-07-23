@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 
 from scraper import config
-from scraper.db import get_cursor, insert_job, mark_jobs_active
+from scraper.db import deactivate_delisted_for_employer, get_cursor, insert_job, mark_jobs_active
 from scraper.title_exclusions import is_excluded_job_title
 from scraper.nrw_major_fetchers import fetch_jobs_for_employer
 
@@ -30,7 +30,8 @@ logger = logging.getLogger("run_nrw_major_checker")
 ROOT = Path(__file__).parent
 YAML_PATH = ROOT / "input_data" / "nrw_major_employers.yaml"
 REQUIREMENTS_PATH = ROOT / "requirements.yaml"
-INACTIVE_AFTER_DAYS = 30
+INACTIVE_AFTER_DAYS = 3
+SOURCE = "company_nrw_major"
 
 
 def _load_exclude_title_keywords() -> list[str]:
@@ -84,6 +85,7 @@ def main() -> None:
     db_ids = _db_ids_nrw_major()
     total_new = 0
     total_seen = 0
+    total_delisted = 0
     failed = 0
 
     for row in employers:
@@ -123,6 +125,10 @@ def main() -> None:
         if seen:
             mark_jobs_active(seen)
             total_seen += len(seen)
+        delisted = deactivate_delisted_for_employer(SOURCE, name, seen)
+        if delisted:
+            logger.info("  -%d delisted (no longer on career page)", delisted)
+            total_delisted += delisted
         logger.info("  %s: %d eligible job(s) this run", name, len(seen))
         time.sleep(config.REQUEST_DELAY_SECONDS)
 
@@ -130,10 +136,11 @@ def main() -> None:
     elapsed = (datetime.now() - start).total_seconds()
     logger.info("-" * 60)
     logger.info(
-        "Done in %.1fs | +%d new | %d seen | -%d stale | %d employer fetch failures",
+        "Done in %.1fs | +%d new | %d seen | -%d delisted | -%d stale | %d employer fetch failures",
         elapsed,
         total_new,
         total_seen,
+        total_delisted,
         deactivated,
         failed,
     )

@@ -85,7 +85,11 @@ print(f"      Length: {len(tg_text)} chars (limit: 4096)", flush=True)
 
 # ── 4. Build HTML email + write to file ───────────────────────────────────────
 print("\n[4/5] Building HTML email body...", flush=True)
-stats = {"total_evaluated": 250, "total_apply": 4, "total_review": 6}
+stats = {
+    "digest_count": 2,
+    "new_today": 5,
+    "active_in_db": 240,
+}
 html_body = reporter.formatter.build_email_html(jobs, stats=stats)
 
 output_path = ROOT / "_test_email.html"

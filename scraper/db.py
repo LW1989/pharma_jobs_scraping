@@ -172,3 +172,31 @@ def mark_jobs_inactive(job_ids: set[str]) -> None:
     with get_cursor() as cur:
         cur.execute(sql, (list(job_ids),))
     logger.info("Marked %d jobs inactive.", len(job_ids))
+
+
+def get_active_job_ids_for_employer(source: str, employer: str) -> set[str]:
+    """Active job IDs for one employer within a source (e.g. company_direct)."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT job_id FROM jobs
+            WHERE source = %s AND employer = %s AND job_active = TRUE
+            """,
+            (source, employer),
+        )
+        return {row["job_id"] for row in cur.fetchall()}
+
+
+def deactivate_delisted_for_employer(
+    source: str,
+    employer: str,
+    seen_ids: set[str],
+) -> int:
+    """
+    After a successful scrape, mark active rows for this employer inactive
+    when they no longer appear on the career listing (pharmiweb-style).
+    """
+    gone = get_active_job_ids_for_employer(source, employer) - seen_ids
+    if gone:
+        mark_jobs_inactive(gone)
+    return len(gone)

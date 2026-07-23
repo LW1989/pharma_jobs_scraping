@@ -129,7 +129,9 @@ def main() -> None:
 
     logger.info("-" * 60)
     logger.info("Step 2 – Email …")
-    stats = reporter.db.count_evaluated_today()
+    n_show = len(jobs) + len(company_jobs) + len(nrw_jobs)
+    stats = reporter.db.count_digest_footer_stats()
+    stats["digest_count"] = n_show
     html_body = reporter.formatter.build_email_html(
         jobs,
         stats=stats,
@@ -139,7 +141,6 @@ def main() -> None:
         nrw_major_jobs=nrw_jobs or None,
         nrw_major_found=nrw_total_unsent if not nrw_jobs else 0,
     )
-    n_show = len(jobs) + len(company_jobs) + len(nrw_jobs)
     subject = (
         f"Pharma Job Digest — {n_show} match{'es' if n_show != 1 else ''}"
         f" — {date.today().strftime('%-d %b %Y')}"
