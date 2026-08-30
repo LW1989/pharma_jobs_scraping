@@ -505,46 +505,70 @@ companies:
     career_url: https://www.eubos.de/jobs
     source_type: html
 
-  # ── Career page not found yet — homepage recorded, scraping disabled ───────
-  # Run: python scripts/discover_career_urls.py
+  # ── Career pages found by scripts/discover_career_urls.py (Aug 2026) ──────
 
+  - name: MEDPERION
+    city: ''
+    country: Germany
+    career_url: https://www.medperion.de/en/karriere-bei-uns
+    source_type: html
+
+  # Part of the Semdor group (above).
+  - name: PB Pharma
+    city: Meerbusch
+    country: Germany
+    career_url: https://www.pbpharma.de/karriere/
+    source_type: html
+
+  - name: SynBiotic Distribution
+    city: Köln
+    country: Germany
+    career_url: https://www.synbiotic.com/de/karriere
+    source_type: html
+
+  # ── No career page — scraping disabled ────────────────────────────────────
+  # Each was checked with scripts/discover_career_urls.py; the note says what it
+  # found. Re-run it if a site is relaunched.
+
+  # Homepage links nothing career-like.
   - name: Qualistery
     city: Neuss
     country: Germany
     career_url: https://qualistery.com
     source_type: skip
 
-  - name: MEDPERION
-    city: ''
-    country: Germany
-    career_url: https://www.medperion.de/en
-    source_type: skip
-
+  # Only /homepage/about/ — no job listing.
   - name: Cannaflos
     city: Köln
     country: Germany
     career_url: https://cannaflos.de
     source_type: skip
 
-  # Absorbed into Ncardia years ago — expect a redirect or a dead domain.
+  # Only management-team pages. Absorbed into Ncardia years ago; the site looks
+  # abandoned rather than merely jobless.
   - name: Axiogenesis
     city: Köln
     country: Germany
     career_url: https://www.axiogenesis.com
     source_type: skip
 
+  # A healthcare recruiting/interim-management firm: its /zielgruppen/…-bewerber
+  # pages advertise client roles, so postings would be filed under this name.
+  # Same reason the industry associations below were left out.
   - name: The Healthonauts
     city: Leverkusen
     country: Germany
     career_url: https://www.thehealthonauts.com
     source_type: skip
 
+  # Only /team.
   - name: Refoxy Pharma
     city: Köln
     country: Germany
     career_url: https://www.refoxy.com
     source_type: skip
 
+  # Homepage links nothing career-like — likely a JS-rendered single-pager.
   - name: VitrofluidiX
     city: Köln
     country: Germany
@@ -557,13 +581,7 @@ companies:
     career_url: https://www.ibsagermany.de
     source_type: skip
 
-  # Part of the Semdor group (above).
-  - name: PB Pharma
-    city: Meerbusch
-    country: Germany
-    career_url: https://www.pbpharma.de
-    source_type: skip
-
+  # Slow, heavily scripted storefront; no career link in the served HTML.
   - name: ABclonal Technology (Europe)
     city: Düsseldorf
     country: Germany
@@ -576,22 +594,10 @@ companies:
     career_url: https://airapharm.de
     source_type: skip
 
-  - name: SynBiotic Distribution
-    city: Köln
-    country: Germany
-    career_url: https://www.synbiotic.com/de/home
-    source_type: skip
-
   - name: ROOBS
     city: Köln
     country: Germany
     career_url: https://roobs.de/de/startseite/
-    source_type: skip
-
-  - name: "!mmunetrue"
-    city: ''
-    country: Germany
-    career_url: https://www.immunetrue.eu
     source_type: skip
 
   - name: Precimmo
@@ -606,6 +612,15 @@ companies:
     career_url: https://www.orthogen.org
     source_type: skip
 
+  # Only /team.
+  - name: "!mmunetrue"
+    city: ''
+    country: Germany
+    career_url: https://www.immunetrue.eu
+    source_type: skip
+
+  # TLS certificate does not cover this hostname, so every fetch fails
+  # verification. Not scrapable until they fix their certificate.
   - name: ToRa Pharma
     city: Troisdorf
     country: Germany

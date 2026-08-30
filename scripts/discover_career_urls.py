@@ -1,18 +1,24 @@
 """
 Career-page discovery helper — one-off, read-only.
 
-Some companies on the watchlist were researched with only a homepage URL. This
-script visits each homepage, scores every outgoing link for "looks like a career
-page", and prints companies.yaml-ready rows for the best candidate. Nothing is
-written: paste the good rows into input_data/companies.yaml yourself and mark the
-UNRESOLVED ones `source_type: skip`.
+Some watchlist companies were researched with only a homepage URL and sit in
+companies.yaml as `source_type: skip`. This script visits each of those
+homepages, scores every outgoing link for "looks like a career page", and
+prints companies.yaml rows. Nothing is written — paste the ready rows in
+yourself.
+
+Results come back in three buckets:
+  READY TO PASTE — an explicit career keyword in the URL (score >= 10)
+  WEAK           — best candidate is probably an about-us or team page; the row
+                   is printed as `skip` so it cannot be pasted by accident
+  UNRESOLVED     — no career-like link, or the fetch failed
 
 Usage:
-    python scripts/discover_career_urls.py                  # the built-in backlog
-    python scripts/discover_career_urls.py --name Refoxy    # one backlog company
+    python scripts/discover_career_urls.py                  # every skip row
+    python scripts/discover_career_urls.py --name Refoxy    # one of them
     python scripts/discover_career_urls.py --url https://example.de --company Foo --city Köln
-    python scripts/discover_career_urls.py --check-yaml     # re-check companies.yaml rows
-                                                            # whose career_url is a bare homepage
+    python scripts/discover_career_urls.py --check-yaml     # re-check rows whose
+                                                            # career_url is a bare homepage
 
 The fetch goes through company_scraper._get_html_career_response(), which warms a
 session on the site root first — several of these hosts 403 a cold deep link.
@@ -46,29 +52,6 @@ logger = logging.getLogger("discover_career_urls")
 
 COMPANIES_PATH = ROOT / "input_data" / "companies.yaml"
 
-# Companies from the Aug 2026 CSV that came with a website but no career URL.
-# (name, city, website)
-BACKLOG: list[tuple[str, str, str]] = [
-    ("Qualistery",                    "Neuss",        "https://qualistery.com"),
-    ("MEDPERION",                     "Köln",         "https://www.medperion.de/en"),
-    ("Cannaflos",                     "Köln",         "https://cannaflos.de"),
-    ("Axiogenesis",                   "Köln",         "https://www.axiogenesis.com"),
-    ("The Healthonauts",              "Leverkusen",   "https://www.thehealthonauts.com"),
-    ("Refoxy Pharma",                 "Köln",         "https://www.refoxy.com"),
-    ("VitrofluidiX",                  "Köln",         "https://vitrofluidix.com"),
-    ("IBSA Germany",                  "Düsseldorf",   "https://www.ibsagermany.de"),
-    ("PB Pharma",                     "Meerbusch",    "https://www.pbpharma.de"),
-    ("ABclonal Technology (Europe)",  "Düsseldorf",   "https://abclonal.com"),
-    ("AIRA Pharm",                    "Düsseldorf",   "https://airapharm.de"),
-    ("SynBiotic Distribution",        "Köln",         "https://www.synbiotic.com/de/home"),
-    ("ROOBS",                         "Köln",         "https://roobs.de/de/startseite/"),
-    ("!mmunetrue",                    "",             "https://www.immunetrue.eu"),
-    ("Precimmo",                      "Köln",         "https://precimmo.com"),
-    ("Orthogen",                      "Düsseldorf",   "https://www.orthogen.org"),
-    ("ToRa Pharma",                   "Troisdorf",    "https://tora-pharma.de"),
-    ("NMVS Connect",                  "",             "https://www.nmvs-connect.com"),
-]
-
 # Path/anchor keywords scored highest → lowest. A career page usually says
 # "Karriere" or "Career"; a jobs listing is nearly as good; "Team"/"Über uns"
 # only counts when nothing better exists.
@@ -84,7 +67,6 @@ KEYWORD_SCORES: list[tuple[str, int]] = [
     (r"work-?with-?us|mit-?uns-?arbeiten|arbeiten-?bei", 7),
     (r"join-?us|join-?our",            6),
     (r"bewerb",                        5),
-    (r"\bteam\b",                      2),
 ]
 
 # Links that superficially match but are never a career listing.
@@ -104,6 +86,13 @@ ATS_HOST = re.compile(
     r"teamtailor\.com|d-vinci\.de)",
     re.IGNORECASE,
 )
+# A run against the real backlog split cleanly: every genuine career page
+# scored 13+ (an explicit karriere/career/stellen keyword in the URL, or
+# "Karriere" as the anchor text), while everything at 2–5 was an about-us or
+# management-team page. Below this a candidate is still reported, but not
+# offered as a paste-ready row.
+CONFIDENT_SCORE = 10
+
 ATS_BONUS = 4
 OFFSITE_PENALTY = 4
 # Above the best a keyword link can reach (10 + 3), so a hosted board outranks
@@ -197,25 +186,36 @@ def discover(name: str, website: str) -> list[tuple[int, str, str]]:
     return ranked
 
 
-def _yaml_row(name: str, city: str, url: str) -> str:
-    return (
-        f"  - name: {name}\n"
-        f"    city: {city}\n"
-        f"    country: Germany\n"
-        f"    career_url: {url}\n"
-        f"    source_type: html\n"
+def _yaml_row(name: str, city: str, url: str, source_type: str = "html") -> str:
+    """
+    Render one companies.yaml entry.
+
+    Goes through the YAML dumper rather than an f-string: a name like
+    "!mmunetrue" is a tag to a YAML parser unless it is quoted, and one
+    hand-built row for it breaks the whole file.
+    """
+    entry = {
+        "name": name,
+        "city": city or "",
+        "country": "Germany",
+        "career_url": url,
+        "source_type": source_type,
+    }
+    dumped = yaml.dump(
+        [entry], allow_unicode=True, sort_keys=False, default_flow_style=False
     )
+    return "".join(f"  {line}\n" for line in dumped.rstrip("\n").splitlines())
 
 
-def _yaml_skip_row(name: str, city: str, website: str) -> str:
-    return (
-        f"  # No career page found on {website}\n"
-        f"  - name: {name}\n"
-        f"    city: {city}\n"
-        f"    country: Germany\n"
-        f"    career_url: {website}\n"
-        f"    source_type: skip\n"
-    )
+def _skip_rows_from_yaml() -> list[tuple[str, str, str]]:
+    """The companies.yaml rows still waiting for a career URL."""
+    with COMPANIES_PATH.open(encoding="utf-8") as f:
+        entries = yaml.safe_load(f)["companies"]
+    return [
+        (c["name"], c.get("city", ""), c.get("career_url", ""))
+        for c in entries
+        if c.get("source_type") == "skip" and c.get("career_url")
+    ]
 
 
 def _homepage_rows_from_yaml() -> list[tuple[str, str, str]]:
@@ -232,7 +232,7 @@ def _homepage_rows_from_yaml() -> list[tuple[str, str, str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--name", help="Only this backlog company (substring match)")
+    parser.add_argument("--name", help="Only companies matching this substring")
     parser.add_argument("--url", help="Ad-hoc website to inspect")
     parser.add_argument("--company", default="Unknown", help="Name to use with --url")
     parser.add_argument("--city", default="", help="City to use with --url")
@@ -246,20 +246,22 @@ def main() -> None:
     elif args.check_yaml:
         targets = _homepage_rows_from_yaml()
     else:
-        targets = BACKLOG
-        if args.name:
-            needle = args.name.lower()
-            targets = [t for t in targets if needle in t[0].lower()]
-            if not targets:
-                logger.error("No backlog company matching %r", args.name)
-                sys.exit(1)
+        targets = _skip_rows_from_yaml()
+
+    if args.name:
+        needle = args.name.lower()
+        targets = [t for t in targets if needle in t[0].lower()]
+    if not targets:
+        logger.error("Nothing to check (no matching companies.yaml rows).")
+        sys.exit(1)
 
     print()
     print("=" * 72)
     print(f"  Career-page discovery — {len(targets)} company/companies (no writes)")
     print("=" * 72)
 
-    resolved: list[tuple[str, str, str]] = []
+    confident: list[tuple[str, str, str]] = []
+    weak: list[tuple[str, str, str, int, str]] = []
     unresolved: list[tuple[str, str, str, str]] = []
 
     for i, (name, city, website) in enumerate(targets, 1):
@@ -277,28 +279,44 @@ def main() -> None:
             unresolved.append((name, city, website, "no career-like link"))
         else:
             for score, url, text in ranked[: args.top]:
-                logger.info("    %2d  %-58s  %s", score, url[:58], text[:30])
-            resolved.append((name, city, ranked[0][1]))
+                flag = "" if score >= CONFIDENT_SCORE else "  (weak)"
+                logger.info("    %2d  %-56s  %s%s", score, url[:56], text[:28], flag)
+            top_score, top_url, top_text = ranked[0]
+            if top_score >= CONFIDENT_SCORE:
+                confident.append((name, city, top_url))
+            else:
+                weak.append((name, city, website, top_score, top_url))
         time.sleep(config.REQUEST_DELAY_SECONDS)
 
-    print()
-    print("=" * 72)
-    print("  companies.yaml rows — review each URL before pasting")
-    print("=" * 72)
-    print()
-    for name, city, url in resolved:
-        print(_yaml_row(name, city, url))
+    if confident:
+        print()
+        print("=" * 72)
+        print("  READY TO PASTE — an explicit career keyword in the URL")
+        print("=" * 72)
+        print()
+        for name, city, url in confident:
+            print(_yaml_row(name, city, url))
+
+    if weak:
+        print("=" * 72)
+        print(f"  WEAK — best candidate scored under {CONFIDENT_SCORE}; usually an")
+        print("  about-us or management-team page, NOT a job listing. Open it first.")
+        print("=" * 72)
+        print()
+        for name, city, website, score, url in weak:
+            print(f"  # best guess ({score}): {url}")
+            print(_yaml_row(name, city, website, source_type="skip"))
 
     if unresolved:
         print("=" * 72)
-        print("  UNRESOLVED — add as skip, or research by hand")
+        print("  UNRESOLVED — keep as skip, or research by hand")
         print("=" * 72)
         print()
         for name, city, website, reason in unresolved:
             print(f"  # {reason}")
-            print(_yaml_skip_row(name, city, website))
+            print(_yaml_row(name, city, website, source_type="skip"))
 
-    print(f"  {len(resolved)} resolved, {len(unresolved)} unresolved")
+    print(f"  {len(confident)} ready, {len(weak)} weak, {len(unresolved)} unresolved")
 
 
 if __name__ == "__main__":

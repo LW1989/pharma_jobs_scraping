@@ -497,16 +497,33 @@ region, none of which appear on pharmiweb.jobs. Watchlist size went 44 → 92.
 | Biomera | — | `html` | no city in the source list |
 | EUBOS | — | `html` | no city in the source list |
 
-### 18 with only a homepage → `source_type: skip`
+### 18 with only a homepage → resolved by discovery
 
-Qualistery, MEDPERION, Cannaflos, Axiogenesis, The Healthonauts, Refoxy Pharma,
-VitrofluidiX, IBSA Germany, PB Pharma, ABclonal Technology (Europe), AIRA Pharm,
-SynBiotic Distribution, ROOBS, !mmunetrue, Precimmo, Orthogen, ToRa Pharma,
-NMVS Connect.
+`scripts/discover_career_urls.py` was run against all 18. It ranks the career-ish
+links on a homepage into three buckets (ready / weak / unresolved) and writes
+nothing. Outcome: **3 resolved, 15 left as `skip`**, each with the reason recorded
+inline in `companies.yaml`.
 
-Run `python scripts/discover_career_urls.py` to rank the career-ish links on each
-homepage; it prints YAML-ready rows and writes nothing. Flip a row to `html` once
-its URL is confirmed. Axiogenesis was absorbed into Ncardia — expect a dead domain.
+| Company | Outcome |
+|---|---|
+| MEDPERION | `/en/karriere-bei-uns` → `html` |
+| PB Pharma | `/karriere/` → `html` |
+| SynBiotic Distribution | `/de/karriere` → `html` |
+| Cannaflos, Refoxy Pharma, !mmunetrue | only `/team` or `/about` — no listing |
+| Axiogenesis | only management-team pages; absorbed into Ncardia, site looks abandoned |
+| The Healthonauts | recruiting/interim-management firm — its applicant pages advertise client roles, so postings would be misattributed (same reason as the associations) |
+| ToRa Pharma | TLS certificate does not cover the hostname; every fetch fails verification |
+| Qualistery, VitrofluidiX, IBSA Germany, ABclonal, AIRA Pharm, ROOBS, Precimmo, Orthogen, NMVS Connect | no career-like link in the served HTML |
+
+Re-run the script if any of those sites is relaunched — it reads the `skip` rows
+straight out of `companies.yaml`, so it always checks exactly what is outstanding.
+
+Two things that first run taught the ranking, now fixed and covered by tests:
+a `team`/`about` link is never a job listing and no longer scores at all, and a
+best candidate below score 10 is printed as a `skip` row rather than a
+ready-to-paste one. Rows are also emitted through the YAML dumper — a name like
+`!mmunetrue` is a *tag* to a YAML parser unless quoted, and the hand-built row
+for it would have broken the file on paste.
 
 ### Not added
 

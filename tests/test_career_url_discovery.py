@@ -122,3 +122,40 @@ def test_page_with_nothing_career_like_ranks_empty(monkeypatch):
       <a href="/produkte">Produkte</a><a href="/impressum">Impressum</a>
     </body></html>"""
     assert _rank(monkeypatch, html) == []
+
+
+def test_yaml_rows_are_parseable_even_for_a_name_starting_with_a_tag_char():
+    # "!mmunetrue" is a YAML tag unless quoted; a hand-built row for it broke
+    # the whole file.
+    import yaml
+
+    block = (
+        disc._yaml_row("!mmunetrue", "", "https://www.immunetrue.eu", "skip")
+        + disc._yaml_row("Acme & Co", "Köln", "https://acme.de/karriere")
+    )
+    parsed = yaml.safe_load("companies:\n" + block)["companies"]
+
+    assert [c["name"] for c in parsed] == ["!mmunetrue", "Acme & Co"]
+    assert parsed[0]["source_type"] == "skip"
+    assert parsed[1]["career_url"] == "https://acme.de/karriere"
+
+
+def test_team_pages_no_longer_score_at_all(monkeypatch):
+    # A management-team page is never a job listing; scoring it produced
+    # ready-to-paste rows pointing at /team and /about.
+    html = """<html><body>
+      <a href="/company/management-team/advisory-board.html">Advisory Board</a>
+      <a href="/team">Unser Team</a>
+      <a href="/homepage/about/">Our team</a>
+    </body></html>"""
+    assert _rank(monkeypatch, html) == []
+
+
+def test_confidence_threshold_sits_above_about_us_noise():
+    # Real-run evidence: genuine career pages scored 13+, noise scored 2-5.
+    assert disc._score_link(
+        "https://acme.de/de/ueber-uns/karriere/", "Karriere", "acme.de"
+    ) >= disc.CONFIDENT_SCORE
+    assert disc._score_link(
+        "https://acme.de/zielgruppen/sonstige-bewerber", "Sonstige Bewerber", "acme.de"
+    ) < disc.CONFIDENT_SCORE
