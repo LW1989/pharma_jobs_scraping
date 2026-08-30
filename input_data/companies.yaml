@@ -301,3 +301,337 @@ companies:
     country: Germany
     career_url: https://www.taconic.com/about/careers#career-opportunities
     source_type: html
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Added Aug 2026 — Köln / Düsseldorf / Bonn research batch.
+  # Rows with source_type: skip have no known career page yet; run
+  #   python scripts/discover_career_urls.py
+  # to find one, then flip them to html.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # ── Köln ───────────────────────────────────────────────────────────────────
+
+  # Source list also gives Meerbusch for the Pharma entity; Biotech GmbH is Köln-Ehrenfeld.
+  - name: Cannamedical
+    city: Köln
+    country: Germany
+    career_url: https://cannamedical.com/karriere/
+    source_type: html
+
+  - name: enua
+    city: Köln
+    country: Germany
+    career_url: https://join.com/companies/enua
+    source_type: join
+    slug: enua
+
+  - name: FARCO-PHARMA
+    city: Köln
+    country: Germany
+    career_url: https://www.farco.de/ueber-uns/karriere/
+    source_type: html
+
+  # Group parent of PB Pharma (below) — watch for the same role on both sites.
+  - name: Semdor Pharma Group
+    city: Köln
+    country: Germany
+    career_url: https://semdor-group.com/en/career/
+    source_type: html
+
+  - name: Altamedics
+    city: Köln
+    country: Germany
+    career_url: https://www.altamedics.de/en-us/Career
+    source_type: html
+
+  - name: Medical CNBS Pharma
+    city: Köln
+    country: Germany
+    career_url: https://www.medical-cnbs.de/jobboerse.php
+    source_type: html
+
+  - name: BOLDER Arzneimittel
+    city: Köln
+    country: Germany
+    career_url: https://www.bolder.de/karriere
+    source_type: html
+
+  - name: Singleron Biotechnologies
+    city: Köln
+    country: Germany
+    career_url: https://singleron.bio/careers/
+    source_type: html
+
+  - name: Togontech
+    city: Köln
+    country: Germany
+    career_url: https://www.togontech.de/careers
+    source_type: html
+
+  # ── Düsseldorf ─────────────────────────────────────────────────────────────
+
+  - name: Numaferm
+    city: Düsseldorf
+    country: Germany
+    career_url: https://numaferm.com/careers/
+    source_type: html
+
+  # URL typo "opportunites" is Dynavax's own — do not correct it.
+  - name: Dynavax
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.dynavax.com/careers/job-opportunites/
+    source_type: html
+
+  # Shopify storefront; tracking query string stripped from the researched URL.
+  - name: Cellavent Healthcare
+    city: Düsseldorf
+    country: Germany
+    career_url: https://cellavent.de/pages/karriere
+    source_type: html
+
+  - name: Hifas da Terra Germany
+    city: Düsseldorf
+    country: Germany
+    career_url: https://hifasdaterra.de/pages/mit-uns-arbeiten
+    source_type: html
+
+  - name: Mycannabis
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.mycannabis.de/jobs/
+    source_type: html
+
+  - name: good healthcare pharma
+    city: Düsseldorf
+    country: Germany
+    career_url: https://job.goodhealthcare.com
+    source_type: html
+
+  - name: SubstiCare
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.substicare.de/karriere
+    source_type: html
+
+  # Talentsoft-hosted board (ASP.NET, server-rendered) — html extraction should reach it.
+  - name: Hal Allergie
+    city: Düsseldorf
+    country: Germany
+    career_url: https://hal-allergy-gmbh-cand.talent-soft.com/startpagina.aspx?LCID=1043
+    source_type: html
+
+  - name: Schantl Pharma Service
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.schantl-pharma-service.de/stellenangebote/
+    source_type: html
+
+  # ── Bonn / Rhein-Sieg ──────────────────────────────────────────────────────
+
+  - name: LAMPseq Diagnostics
+    city: Bonn
+    country: Germany
+    career_url: https://lampseq.eu/en/work-with-us/
+    source_type: html
+
+  - name: Medios Solutions
+    city: Bonn
+    country: Germany
+    career_url: https://career.medios.group/stellenportal
+    source_type: html
+
+  - name: I&L Biosystems
+    city: Troisdorf
+    country: Germany
+    career_url: https://jobs.il-biosystems.com
+    source_type: html
+
+  - name: CellSystems
+    city: Troisdorf
+    country: Germany
+    career_url: https://cellsystems.eu/career/
+    source_type: html
+
+  # ── Rhein-Kreis Neuss / Bergisch / other NRW ───────────────────────────────
+
+  - name: Miltenyi Biomedicine
+    city: Bergisch Gladbach
+    country: Germany
+    career_url: https://www.miltenyibiomedicine.com/careers/
+    source_type: html
+
+  - name: PS Pharma Service
+    city: Meerbusch
+    country: Germany
+    career_url: https://www.pspharmaservice.de/unternehmen/karriere/
+    source_type: html
+
+  - name: J&K Consulting
+    city: Rommerskirchen
+    country: Germany
+    career_url: https://j-k-consulting.de/karriere/
+    source_type: html
+
+  - name: ANSAL Integrated Pharma Solutions
+    city: Solingen
+    country: Germany
+    career_url: https://ansal-ips.com/careers-expert-network/
+    source_type: html
+
+  - name: Pharma Gerke
+    city: Grevenbroich
+    country: Germany
+    career_url: https://pharma-gerke.de/wir-suchen-talente-lust-auf-eine-neue-herausforderung/
+    source_type: html
+
+  - name: Active Pharma
+    city: Krefeld
+    country: Germany
+    career_url: https://activepharma.de/karriere/
+    source_type: html
+
+  # ── No city recorded in the source list ────────────────────────────────────
+
+  - name: Biomera
+    city: ''
+    country: Germany
+    career_url: https://biomera.eu/careers/
+    source_type: html
+
+  - name: EUBOS
+    city: ''
+    country: Germany
+    career_url: https://www.eubos.de/jobs
+    source_type: html
+
+  # ── Career page not found yet — homepage recorded, scraping disabled ───────
+  # Run: python scripts/discover_career_urls.py
+
+  - name: Qualistery
+    city: Neuss
+    country: Germany
+    career_url: https://qualistery.com
+    source_type: skip
+
+  - name: MEDPERION
+    city: ''
+    country: Germany
+    career_url: https://www.medperion.de/en
+    source_type: skip
+
+  - name: Cannaflos
+    city: Köln
+    country: Germany
+    career_url: https://cannaflos.de
+    source_type: skip
+
+  # Absorbed into Ncardia years ago — expect a redirect or a dead domain.
+  - name: Axiogenesis
+    city: Köln
+    country: Germany
+    career_url: https://www.axiogenesis.com
+    source_type: skip
+
+  - name: The Healthonauts
+    city: Leverkusen
+    country: Germany
+    career_url: https://www.thehealthonauts.com
+    source_type: skip
+
+  - name: Refoxy Pharma
+    city: Köln
+    country: Germany
+    career_url: https://www.refoxy.com
+    source_type: skip
+
+  - name: VitrofluidiX
+    city: Köln
+    country: Germany
+    career_url: https://vitrofluidix.com
+    source_type: skip
+
+  - name: IBSA Germany
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.ibsagermany.de
+    source_type: skip
+
+  # Part of the Semdor group (above).
+  - name: PB Pharma
+    city: Meerbusch
+    country: Germany
+    career_url: https://www.pbpharma.de
+    source_type: skip
+
+  - name: ABclonal Technology (Europe)
+    city: Düsseldorf
+    country: Germany
+    career_url: https://abclonal.com
+    source_type: skip
+
+  - name: AIRA Pharm
+    city: Düsseldorf
+    country: Germany
+    career_url: https://airapharm.de
+    source_type: skip
+
+  - name: SynBiotic Distribution
+    city: Köln
+    country: Germany
+    career_url: https://www.synbiotic.com/de/home
+    source_type: skip
+
+  - name: ROOBS
+    city: Köln
+    country: Germany
+    career_url: https://roobs.de/de/startseite/
+    source_type: skip
+
+  - name: "!mmunetrue"
+    city: ''
+    country: Germany
+    career_url: https://www.immunetrue.eu
+    source_type: skip
+
+  - name: Precimmo
+    city: Köln
+    country: Germany
+    career_url: https://precimmo.com
+    source_type: skip
+
+  - name: Orthogen
+    city: Düsseldorf
+    country: Germany
+    career_url: https://www.orthogen.org
+    source_type: skip
+
+  - name: ToRa Pharma
+    city: Troisdorf
+    country: Germany
+    career_url: https://tora-pharma.de
+    source_type: skip
+
+  - name: NMVS Connect
+    city: ''
+    country: Germany
+    career_url: https://www.nmvs-connect.com
+    source_type: skip
+
+# ── Considered and deliberately not added (Aug 2026 batch) ───────────────────
+#
+# Industry associations / networks, not employers. Their job pages advertise
+# member companies' roles, so every posting would be filed under the
+# association's name:
+#   Pharma Deutschland (Bonn)                     https://www.pharmadeutschland.de/der-verband/stellenangebote/
+#   PLCD Pharma-Lizenz-Club Deutschland e.V.      https://plcd.de/stellenausschreibungen/
+#   Forschungsvereinigung der Arzneimittel-
+#     Hersteller e.V. (FAH, Bonn)                 https://fah-bonn.de/?page_id=1085
+#   LifeScienceNet Düsseldorf                     (no website recorded)
+#
+# Already covered elsewhere in the pipeline:
+#   Cellex Cell Professionals   → "Cellex" above (recruitee, slug cellexgmbh)
+#   Klosterfrau Group           → "Klosterfrau" in nrw_major_employers.yaml (successfactors)
+#   MCM Klosterfrau Vertriebsgesellschaft mbH → same group as Klosterfrau
+#   Lonza Cologne               → "Lonza" in nrw_major_employers.yaml
+#   Viatris (Troisdorf)         → "Viatris" in nrw_major_employers.yaml
