@@ -36,7 +36,7 @@ def _rank(monkeypatch, html, base="https://acme.de/"):
     monkeypatch.setattr(
         disc, "_get_html_career_response", lambda url: _FakeResponse(html, base)
     )
-    return disc.discover("Acme", base)
+    return disc.discover(base)
 
 
 GERMAN_HOMEPAGE = """
@@ -111,10 +111,16 @@ def test_offsite_non_ats_link_is_penalised(monkeypatch):
 def test_www_and_bare_host_count_as_the_same_site(monkeypatch):
     html = """<html><body>
       <a href="https://www.acme.de/karriere">Karriere</a>
+      <a href="https://unrelated.example/karriere">Karriere anderswo</a>
     </body></html>"""
-    score, url, _text = _rank(monkeypatch, html)[0]
-    assert url == "https://www.acme.de/karriere"
-    assert score == 13  # 10 + 3 for the keyword being in the URL, no penalty
+    ranked = _rank(monkeypatch, html)
+    on_site = [r for r in ranked if "www.acme.de" in r[1]][0]
+    off_site = [r for r in ranked if "unrelated.example" in r[1]][0]
+
+    # www.acme.de is the same registrable domain as the base, so it must not be
+    # docked the off-site penalty that unrelated.example takes.
+    assert on_site[0] > off_site[0]
+    assert on_site[0] >= disc.CONFIDENT_SCORE
 
 
 def test_page_with_nothing_career_like_ranks_empty(monkeypatch):

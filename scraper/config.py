@@ -35,7 +35,13 @@ REPORTER_DRY_RUN = os.environ.get("REPORTER_DRY_RUN", "").lower() in (
 # byte-identical to the previous run. Set to 0 to force a full re-extraction.
 COMPANY_PAGE_HASH_CACHE = os.environ.get(
     "COMPANY_PAGE_HASH_CACHE", "1"
-).lower() not in ("0", "false", "no")
+).strip().lower() in ("1", "true", "yes")
+
+# …but re-extract at least this often even when the page has not changed, so a
+# bad extraction cannot be re-confirmed from the DB indefinitely.
+COMPANY_PAGE_CACHE_MAX_DAYS = int(
+    os.environ.get("COMPANY_PAGE_CACHE_MAX_DAYS", "7")
+)
 
 # Google Sheets API — required only for scripts/sync_companies_from_sheet.py
 GOOGLE_SHEET_ID         = os.environ.get("GOOGLE_SHEET_ID", "")

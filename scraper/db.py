@@ -224,15 +224,25 @@ def get_active_jobs_for_employer(source: str, employer: str) -> list[dict]:
         return [dict(row) for row in cur.fetchall()]
 
 
-def get_company_page_hash(employer: str) -> str | None:
-    """Career-page text hash recorded on the previous check, if any."""
+def get_company_page_state(employer: str) -> dict | None:
+    """
+    Career-page text hash and check date from the previous run, if any.
+
+    checked_on is returned so the caller can expire the cache: a hash match
+    alone would re-confirm a bad extraction for as long as the page text is
+    untouched.
+    """
     with get_cursor() as cur:
         cur.execute(
-            "SELECT page_hash FROM company_page_state WHERE employer = %s",
+            """
+            SELECT page_hash, checked_on
+              FROM company_page_state
+             WHERE employer = %s
+            """,
             (employer,),
         )
         row = cur.fetchone()
-        return row["page_hash"] if row else None
+        return dict(row) if row else None
 
 
 def set_company_page_hash(employer: str, page_hash: str) -> None:

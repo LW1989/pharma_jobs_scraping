@@ -32,6 +32,7 @@ import json
 import logging
 import re
 import time
+from datetime import date
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
@@ -211,8 +212,9 @@ def fetch_jobs(company: dict) -> list[dict]:
         logger.info("  %s: %d job(s) found", name, len(jobs))
         return jobs
 
-    except Exception as exc:
-        logger.debug("  %s: fetch failed — %s", name, exc)
+    except Exception:
+        # Deliberately not swallowed: run_company_checker.py delists an
+        # employer's whole job set when a fetch comes back empty.
         raise
 
 
@@ -402,6 +404,22 @@ def _jobs_from_jsonld(html: str) -> list[dict]:
     return out
 
 
+def _next_data_record(item: dict) -> dict | None:
+    """One candidate job from a __NEXT_DATA__ node, or None if it has no title."""
+    title = str(item.get("title") or item.get("name") or "").strip()
+    if not title:
+        return None
+    return {
+        "title": title,
+        "url": str(item.get("url") or item.get("link")
+                   or item.get("permalink") or "").strip(),
+        "location": str(item.get("location") or item.get("city") or "").strip(),
+        "details": _html_to_text(
+            item.get("description") or item.get("descriptionHtml") or ""
+        ),
+    }
+
+
 def _jobs_from_next_data(html: str) -> list[dict]:
     """
     Best-effort walk of a Next.js __NEXT_DATA__ payload.
@@ -409,6 +427,11 @@ def _jobs_from_next_data(html: str) -> list[dict]:
     Looks for any list held under a job-ish key whose items are dicts carrying a
     title. Shapes differ between join.com releases, so every field is optional
     except the title.
+
+    A page usually carries the same title more than once — a real posting under
+    "jobs" and a bare stub under "similarJobs"/"recommendedJobs". Traversal
+    order decides nothing: candidates are deduped by title keeping the richest
+    record, so the stub can never displace the posting it shadows.
     """
     match = _NEXT_DATA_RE.search(html)
     if not match:
@@ -418,8 +441,8 @@ def _jobs_from_next_data(html: str) -> list[dict]:
     except (ValueError, TypeError):
         return []
 
-    found: list[dict] = []
-    seen_titles: set[str] = set()
+    best: dict[str, dict] = {}
+    order: list[str] = []
     stack = [(None, data)]
     while stack:
         key, node = stack.pop()
@@ -428,27 +451,24 @@ def _jobs_from_next_data(html: str) -> list[dict]:
             continue
         if not isinstance(node, list):
             continue
-        if not (key and _JOB_LIST_KEY_RE.search(str(key))):
-            stack.extend((key, item) for item in node)
-            continue
+        job_ish = bool(key and _JOB_LIST_KEY_RE.search(str(key)))
         for item in node:
             if not isinstance(item, dict):
                 continue
-            title = str(item.get("title") or item.get("name") or "").strip()
-            if not title or title.lower() in seen_titles:
+            record = _next_data_record(item) if job_ish else None
+            if record is None:
                 stack.append((key, item))
                 continue
-            seen_titles.add(title.lower())
-            found.append({
-                "title": title,
-                "url": str(item.get("url") or item.get("link")
-                           or item.get("permalink") or "").strip(),
-                "location": str(item.get("location") or item.get("city") or "").strip(),
-                "details": _html_to_text(
-                    item.get("description") or item.get("descriptionHtml") or ""
-                ),
-            })
-    return found
+            dedup_key = record["title"].lower()
+            filled = sum(1 for f in ("url", "location", "details") if record[f])
+            if dedup_key not in best:
+                best[dedup_key] = record
+                order.append(dedup_key)
+            elif filled > sum(
+                1 for f in ("url", "location", "details") if best[dedup_key][f]
+            ):
+                best[dedup_key] = record
+    return [best[k] for k in order]
 
 
 def _fetch_join(company: dict) -> list[dict]:
@@ -517,6 +537,31 @@ class _JobListings(BaseModel):
     jobs: list[_JobListing]
 
 
+_PAGE_CACHE_WARNED = False
+
+
+def _warn_page_cache_unavailable(name: str, exc: Exception) -> None:
+    """
+    Warn once per process, not per company.
+
+    The cache is answered from the DB, so a missing company_page_state table
+    (scripts/migrate_db.py never run) disables it for every company. At DEBUG
+    that is invisible at the runner's INFO level, and the cache silently
+    no-ops forever while still paying for a failed connection per company.
+    """
+    global _PAGE_CACHE_WARNED
+    if not _PAGE_CACHE_WARNED:
+        _PAGE_CACHE_WARNED = True
+        logger.warning(
+            "Career-page cache unavailable (%s: %s) — every company will be "
+            "re-extracted this run. If company_page_state is missing, run "
+            "scripts/migrate_db.py.",
+            name, exc,
+        )
+    else:
+        logger.debug("  %s: page-hash cache unavailable (%s)", name, exc)
+
+
 def _cached_listing_for_unchanged_page(company: dict, page_hash: str) -> list[dict] | None:
     """
     Career pages change monthly, the checker runs daily. When a page's text is
@@ -533,11 +578,22 @@ def _cached_listing_for_unchanged_page(company: dict, page_hash: str) -> list[di
 
     name = company["name"]
     try:
-        if db.get_company_page_hash(name) != page_hash:
+        state = db.get_company_page_state(name)
+        if not state or state.get("page_hash") != page_hash:
             return None
+
+        checked_on = state.get("checked_on")
+        age_days = (date.today() - checked_on).days if checked_on else None
+        if age_days is None or age_days >= config.COMPANY_PAGE_CACHE_MAX_DAYS:
+            logger.info(
+                "  %s: cached listing is %s day(s) old — re-extracting",
+                name, age_days,
+            )
+            return None
+
         rows = db.get_active_jobs_for_employer("company_direct", name)
     except Exception as exc:
-        logger.debug("  %s: page-hash cache unavailable (%s)", name, exc)
+        _warn_page_cache_unavailable(name, exc)
         return None
 
     if not rows:
@@ -633,7 +689,7 @@ def _fetch_html_llm(company: dict) -> list[dict]:
     try:
         db.set_company_page_hash(company["name"], page_hash)
     except Exception as exc:
-        logger.debug("  %s: could not store page hash (%s)", company["name"], exc)
+        _warn_page_cache_unavailable(company["name"], exc)
 
     jobs = []
     for item in listings:

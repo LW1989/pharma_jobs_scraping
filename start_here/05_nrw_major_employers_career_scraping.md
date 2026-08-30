@@ -191,8 +191,26 @@ Workday board can be read without Playwright. YAML keys: `workday_cxs_host`
 `workday_cxs_tenant`, `workday_cxs_site`, `workday_cxs_locale`,
 `workday_cxs_facets` (passed through as `appliedFacets`), `workday_cxs_queries`,
 `workday_cxs_max_list_jobs`, `workday_cxs_page_size`, `max_jobs`.
-Listing rows are prefiltered with `listing_row_worth_detail_fetch` before the
-detail GET when `listing_nrw_scoped` is false.
+Deliberate design points, each of which was a bug first:
+
+- **No listing-level location prefilter.** `locationsText` is an aggregate for
+  multi-site postings, and the NRW location helpers are a whitelist that drops
+  whatever they do not recognise — so gating the detail GET on the listing
+  snippet discards rows the eligibility pass, which reads the body, accepts.
+  `fetch_fortrea_clinical` has none either.
+- **Per-query budget.** Each entry in `workday_cxs_queries` gets
+  `max_list // len(queries)`. With one shared budget a broad query starves the
+  targeted ones that follow it — `['', 'Troisdorf']` on a board with more than
+  `max_list` postings never ran `Troisdorf` at all.
+- **Raises on a listing failure.** An empty return means "nothing eligible",
+  and `run_nrw_major_checker.py` delists everything it does not see. A 5xx must
+  not look like an empty board. Also raises when every detail fetch fails.
+- **`job_id` never depends on `externalUrl`.** `_build_row` hashes the URL, so
+  a server-optional field would re-key the same posting between runs and churn
+  it out of and back into the digest. The URL is derived from `externalPath`.
+- **The probe runs the fetcher, not the listing.** `MIN_EXPECTED` is an NRW
+  number; probing the raw country-wide listing would report ~120 and "ok" while
+  the fetcher yielded nothing.
 
 It is a candidate to replace the Playwright `workday` path for QIAGEN, Covestro,
 Evonik and Medtronic — none of them switched over yet.

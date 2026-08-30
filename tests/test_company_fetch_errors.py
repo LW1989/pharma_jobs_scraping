@@ -66,7 +66,7 @@ def test_readable_page_with_no_openings_returns_empty_list(monkeypatch):
     )
     monkeypatch.setattr(cs, "_get_html_career_response", lambda url: _FakeResponse(page))
     monkeypatch.setattr(cs, "_extract_listings_with_llm", lambda *a, **kw: [])
-    monkeypatch.setattr(cs.db, "get_company_page_hash", lambda name: None)
+    monkeypatch.setattr(cs.db, "get_company_page_state", lambda name: None)
     monkeypatch.setattr(cs.db, "set_company_page_hash", lambda name, page_hash: None)
 
     assert cs.fetch_jobs(COMPANY) == []

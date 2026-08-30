@@ -44,7 +44,21 @@ NEXT_DATA_PAGE = """
    "location":"Köln","description":"<b>Sell</b> things"},
   {"id":10,"title":"Intern","city":"Düsseldorf"},
   {"noTitle":true}
-]},"unrelatedList":[1,2,3]}}}
+],
+"articles":[{"title":"Blog: our Series A","url":"https://enua.de/blog/series-a"}],
+"teamMembers":[{"name":"Dr. Berger","title":"Head of Lab"}]},
+"unrelatedList":[1,2,3]}}}
+</script></body></html>
+"""
+
+# The standard Next.js shape: the real posting under "jobs", a bare stub with
+# the same title under "similarJobs". Traversal order must not decide which wins.
+SHADOWED_PAGE = """
+<html><body><script id="__NEXT_DATA__" type="application/json">
+{"props":{"pageProps":{
+  "similarJobs":[{"id":99,"title":"QA Manager"}],
+  "jobs":[{"id":1,"title":"QA Manager","url":"https://join.com/companies/enua/1-qa",
+           "location":"Köln","description":"the real posting"}]}}}
 </script></body></html>
 """
 
@@ -89,3 +103,37 @@ def test_parsers_return_empty_on_missing_or_malformed_payloads():
     assert _jobs_from_next_data("<html></html>") == []
     assert _jobs_from_jsonld('<script type="application/ld+json">{oops</script>') == []
     assert _jobs_from_next_data('<script id="__NEXT_DATA__">{oops</script>') == []
+
+
+def test_non_job_lists_are_not_harvested():
+    # Pins the job-ish key selection: "articles" and "teamMembers" both hold
+    # dicts with a "title", so a regex that matched every key would sweep a blog
+    # post and a staff bio into the watchlist.
+    titles = set(_by_title(_jobs_from_next_data(NEXT_DATA_PAGE)))
+    assert titles == {"Sales Rep", "Intern"}
+    assert "Blog: our Series A" not in titles
+    assert "Head of Lab" not in titles
+
+
+def test_a_stub_never_displaces_the_real_posting_it_shadows():
+    jobs = _jobs_from_next_data(SHADOWED_PAGE)
+
+    assert len(jobs) == 1, f"the duplicate title should collapse to one: {jobs}"
+    job = jobs[0]
+    assert job["url"] == "https://join.com/companies/enua/1-qa"
+    assert job["location"] == "Köln"
+    assert job["details"] == "the real posting"
+
+
+def test_the_richest_record_wins_regardless_of_payload_order():
+    reordered = SHADOWED_PAGE.replace(
+        '"similarJobs":[{"id":99,"title":"QA Manager"}],\n  ', ""
+    ).replace(
+        '"location":"Köln","description":"the real posting"}]}}}',
+        '"location":"Köln","description":"the real posting"}],'
+        '"similarJobs":[{"id":99,"title":"QA Manager"}]}}}',
+    )
+    jobs = _jobs_from_next_data(reordered)
+
+    assert len(jobs) == 1
+    assert jobs[0]["url"].endswith("/1-qa")

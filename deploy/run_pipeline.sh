@@ -21,6 +21,10 @@ git pull origin master >> "$LOG_DIR/cron_$DATE.log" 2>&1 \
 # Install any new dependencies quietly
 .venv/bin/pip install -r requirements.txt -q >> "$LOG_DIR/cron_$DATE.log" 2>&1
 
+# Apply any new schema migrations (idempotent; safe to re-run every day)
+$PYTHON scripts/migrate_db.py >> "$LOG_DIR/cron_$DATE.log" 2>&1 \
+  || echo "[$(date)] WARNING: migrate_db.py failed, continuing" >> "$LOG_DIR/cron_$DATE.log"
+
 # Run the pipeline
 $PYTHON run_scraper.py >> "$LOG_DIR/cron_$DATE.log" 2>&1
 

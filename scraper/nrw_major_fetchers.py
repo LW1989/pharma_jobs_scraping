@@ -1810,11 +1810,15 @@ def _workday_cxs_detail(company: dict, external_path: str) -> dict:
     return resp.json().get("jobPostingInfo") or {}
 
 
-def _workday_cxs_public_url(company: dict, external_path: str, info: dict) -> str:
-    """Prefer the URL Workday itself advertises; otherwise rebuild the site URL."""
-    external = (info.get("externalUrl") or "").strip()
-    if external:
-        return external
+def _workday_cxs_public_url(company: dict, external_path: str) -> str:
+    """
+    Rebuild the public site URL deterministically from the external path.
+
+    Deliberately does not use the payload's optional `externalUrl`: _build_row
+    hashes the URL into job_id, so a field the server may omit or vary between
+    runs would re-key the same posting and churn it out of and back into the
+    digest. Same approach as _fortrea_phenom_url.
+    """
     path = external_path if external_path.startswith("/") else f"/{external_path}"
     locale = (company.get("workday_cxs_locale") or "en-US").strip()
     site = (company.get("workday_cxs_site") or "").strip()
@@ -1822,23 +1826,33 @@ def _workday_cxs_public_url(company: dict, external_path: str, info: dict) -> st
 
 
 def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
+    """
+    Union the configured searches, giving each its own budget.
+
+    A shared budget consumed in query order lets a broad search starve the
+    targeted ones that follow — with queries ['', 'Troisdorf'] and a cap of
+    120, a German board with more than 120 postings never runs 'Troisdorf' at
+    all. Each query therefore gets max_list // len(queries), and the total is
+    capped afterwards.
+
+    A failing search raises rather than returning what it has: a short listing
+    is indistinguishable from a shrinking one to the caller, and the caller
+    delists everything it does not see.
+    """
     max_list = int(company.get("workday_cxs_max_list_jobs", 150))
     page_size = int(company.get("workday_cxs_page_size", 20))
     queries: list[str] = list(company.get("workday_cxs_queries") or [""])
+    per_query = max(page_size, max_list // max(len(queries), 1))
 
     seen_paths: set[str] = set()
     ordered: list[dict] = []
     for query in queries:
         offset = 0
-        total = 0
-        while offset < max_list:
-            try:
-                batch, total = _workday_cxs_search(
-                    company, query, offset=offset, limit=page_size
-                )
-            except Exception as exc:
-                logger.warning("%s workday_cxs search %r: %s", employer, query, exc)
-                break
+        collected_here = 0
+        while collected_here < per_query and len(ordered) < max_list:
+            batch, total = _workday_cxs_search(
+                company, query, offset=offset, limit=page_size
+            )
             if not batch:
                 break
             new = 0
@@ -1849,69 +1863,91 @@ def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
                 seen_paths.add(path)
                 ordered.append(posting)
                 new += 1
+                collected_here += 1
             logger.info(
-                "%s workday_cxs %r offset %d: +%d new (total %d, remote total %d)",
-                employer, query, offset, new, len(ordered), total,
+                "%s workday_cxs %r offset %d: +%d new (query %d/%d, total %d, "
+                "remote total %d)",
+                employer, query, offset, new, collected_here, per_query,
+                len(ordered), total,
             )
-            if len(ordered) >= max_list:
-                return ordered[:max_list]
             offset += page_size
             if offset >= total:
                 break
             time.sleep(config.REQUEST_DELAY_SECONDS)
+        if len(ordered) >= max_list:
+            break
     return ordered[:max_list]
 
 
 def probe_workday_cxs_job_count(company: dict) -> tuple[str, int]:
-    employer = company.get("name", "workday_cxs")
+    """
+    Count the jobs the fetcher would actually keep, not the raw listing size.
+
+    The listing is the whole country; MIN_EXPECTED is an NRW number, so probing
+    the listing would report ~120 and "ok" while the fetcher yields nothing.
+    Matches the smartrecruiters/eightfold branches, which also probe the fetcher.
+    """
     try:
-        return "ok", len(_workday_cxs_collect_refs(company, employer))
+        return "ok", len(fetch_workday_cxs(company))
     except Exception as exc:
         return str(exc)[:120], -1
 
 
 def fetch_workday_cxs(company: dict) -> list[dict]:
+    """
+    Raises on a listing failure — an empty return means "the board lists
+    nothing eligible", and run_nrw_major_checker.py delists on that.
+    """
     employer = company["name"]
     max_jobs = int(
         company.get("max_jobs", company.get("workday_cxs_max_list_jobs", 150))
     )
-    scoped = bool(company.get("listing_nrw_scoped"))
     jobs: list[dict] = []
 
-    try:
-        refs = _workday_cxs_collect_refs(company, employer)
-        logger.info("%s workday_cxs: %d listing ref(s)", employer, len(refs))
-        for posting in refs:
-            if len(jobs) >= max_jobs:
-                break
-            external_path = (posting.get("externalPath") or "").strip()
-            if not external_path:
-                continue
+    refs = _workday_cxs_collect_refs(company, employer)
+    logger.info("%s workday_cxs: %d listing ref(s)", employer, len(refs))
 
-            # Skip the detail GET for rows the listing already rules out.
-            loc_snip = (posting.get("locationsText") or "").strip()
-            if not scoped and not listing_row_worth_detail_fetch(loc_snip):
-                continue
+    detail_attempts = 0
+    detail_failures = 0
+    for posting in refs:
+        if len(jobs) >= max_jobs:
+            break
+        external_path = (posting.get("externalPath") or "").strip()
+        if not external_path:
+            continue
 
-            try:
-                info = _workday_cxs_detail(company, external_path)
-            except Exception as exc:
-                logger.debug("workday_cxs job %s: %s", external_path, exc)
-                continue
+        # No listing-level location prefilter here, deliberately: locationsText
+        # is an aggregate for multi-site postings, and the NRW helpers are a
+        # whitelist that drops whatever they do not recognise — which would
+        # discard rows the eligibility pass, reading the body, would accept.
+        # fetch_fortrea_clinical, the fetcher this mirrors, has none either.
+        detail_attempts += 1
+        try:
+            info = _workday_cxs_detail(company, external_path)
+        except Exception as exc:
+            detail_failures += 1
+            logger.debug("workday_cxs job %s: %s", external_path, exc)
+            continue
 
-            title = (info.get("title") or posting.get("title") or "").strip()
-            loc = _fortrea_location_from_detail(info) or loc_snip
-            body = _fortrea_html_to_text(info.get("jobDescription") or "")[:12000]
-            job_url = _workday_cxs_public_url(company, external_path, info)
-            if not job_url or not title:
-                continue
-            if not job_eligible_for_employer(company, loc, body, title=title):
-                continue
-            jobs.append(_build_row(employer, title, job_url, loc[:200], body))
-            time.sleep(config.REQUEST_DELAY_SECONDS)
-        logger.info("%s workday_cxs: %d eligible job(s)", employer, len(jobs))
-    except Exception as exc:
-        logger.warning("workday_cxs %s: %s", employer, exc)
+        title = (info.get("title") or posting.get("title") or "").strip()
+        loc = _fortrea_location_from_detail(info) or (
+            posting.get("locationsText") or ""
+        ).strip()
+        body = _fortrea_html_to_text(info.get("jobDescription") or "")[:12000]
+        job_url = _workday_cxs_public_url(company, external_path)
+        if not job_url or not title:
+            continue
+        if not job_eligible_for_employer(company, loc, body, title=title):
+            continue
+        jobs.append(_build_row(employer, title, job_url, loc[:200], body))
+        time.sleep(config.REQUEST_DELAY_SECONDS)
+
+    if detail_attempts and detail_failures == detail_attempts:
+        raise RuntimeError(
+            f"{employer}: all {detail_attempts} workday_cxs detail fetch(es) failed"
+        )
+
+    logger.info("%s workday_cxs: %d eligible job(s)", employer, len(jobs))
     return jobs
 
 

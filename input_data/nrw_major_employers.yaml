@@ -175,8 +175,12 @@ employers:
 
   # Troisdorf plant + German remote roles. Browserless Workday CXS JSON (same
   # endpoints the Fortrea fetcher uses) rather than the Playwright workday path.
-  # Country facet id dcc5b76… is Workday's global reference for Germany — the
-  # same one Medtronic uses above.
+  # The facet id dcc5b76… is Workday's global reference for Germany, the same
+  # value Medtronic uses above — but under a different facet KEY: Medtronic's
+  # board calls it locationCountry, this one calls it Country. Both keys are
+  # taken verbatim from each board's own front-end URL.
+  # Targeted queries run before the broad one: each query gets an equal share
+  # of workday_cxs_max_list_jobs, so ordering only affects which fills first.
   - name: Viatris
     source_type: workday_cxs
     listing_nrw_scoped: false
@@ -188,8 +192,8 @@ employers:
       Country:
         - dcc5b7608d8644b3a93716604e78e995
     workday_cxs_queries:
-      - ''
       - Troisdorf
+      - ''
     workday_cxs_max_list_jobs: 120
     max_jobs: 40
 

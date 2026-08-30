@@ -158,7 +158,7 @@ def _score_link(href: str, text: str, base_netloc: str) -> int:
     return max(score, 0)
 
 
-def discover(name: str, website: str) -> list[tuple[int, str, str]]:
+def discover(website: str) -> list[tuple[int, str, str]]:
     """Return [(score, url, link_text)] best first, for one company homepage."""
     resp = _get_html_career_response(website)
     resp.raise_for_status()
@@ -267,7 +267,7 @@ def main() -> None:
     for i, (name, city, website) in enumerate(targets, 1):
         logger.info("[%d/%d]  %-32s %s", i, len(targets), name, website)
         try:
-            ranked = discover(name, website)
+            ranked = discover(website)
         except Exception as exc:
             logger.warning("    FAILED: %s", exc)
             unresolved.append((name, city, website, str(exc)[:80]))

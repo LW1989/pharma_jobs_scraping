@@ -356,8 +356,9 @@ companies:
     career_url: https://www.bolder.de/karriere
     source_type: html
 
+  # Source list records no city.
   - name: Singleron Biotechnologies
-    city: Köln
+    city: ''
     country: Germany
     career_url: https://singleron.bio/careers/
     source_type: html
@@ -530,123 +531,135 @@ companies:
   # Each was checked with scripts/discover_career_urls.py; the note says what it
   # found. Re-run it if a site is relaunched.
 
-  # Homepage links nothing career-like.
   - name: Qualistery
     city: Neuss
     country: Germany
     career_url: https://qualistery.com
     source_type: skip
+    notes: >-
+      No career-like link on the homepage (discover_career_urls, Aug
+      2026).
 
-  # Only /homepage/about/ — no job listing.
   - name: Cannaflos
     city: Köln
     country: Germany
     career_url: https://cannaflos.de
     source_type: skip
+    notes: >-
+      Homepage links only /homepage/about/ — no job listing.
 
-  # Only management-team pages. Absorbed into Ncardia years ago; the site looks
-  # abandoned rather than merely jobless.
   - name: Axiogenesis
     city: Köln
     country: Germany
     career_url: https://www.axiogenesis.com
     source_type: skip
+    notes: >-
+      Only management-team pages. Absorbed into Ncardia years ago; the
+      site looks abandoned rather than merely jobless.
 
-  # A healthcare recruiting/interim-management firm: its /zielgruppen/…-bewerber
-  # pages advertise client roles, so postings would be filed under this name.
-  # Same reason the industry associations below were left out.
   - name: The Healthonauts
     city: Leverkusen
     country: Germany
     career_url: https://www.thehealthonauts.com
     source_type: skip
+    notes: >-
+      Recruiting / interim-management firm: its applicant pages advertise
+      client roles, so postings would be filed under this name. Same
+      misattribution that kept the industry associations out.
 
-  # Only /team.
   - name: Refoxy Pharma
     city: Köln
     country: Germany
     career_url: https://www.refoxy.com
     source_type: skip
+    notes: >-
+      Homepage links only /team.
 
-  # Homepage links nothing career-like — likely a JS-rendered single-pager.
   - name: VitrofluidiX
     city: Köln
     country: Germany
     career_url: https://vitrofluidix.com
     source_type: skip
+    notes: >-
+      No career-like link in the served HTML — likely a JS-rendered
+      single-pager.
 
   - name: IBSA Germany
     city: Düsseldorf
     country: Germany
     career_url: https://www.ibsagermany.de
     source_type: skip
+    notes: >-
+      No career-like link in the served HTML.
 
-  # Slow, heavily scripted storefront; no career link in the served HTML.
   - name: ABclonal Technology (Europe)
     city: Düsseldorf
     country: Germany
     career_url: https://abclonal.com
     source_type: skip
+    notes: >-
+      Slow, heavily scripted storefront; no career link in the served
+      HTML.
 
   - name: AIRA Pharm
     city: Düsseldorf
     country: Germany
     career_url: https://airapharm.de
     source_type: skip
+    notes: >-
+      No career-like link in the served HTML.
 
   - name: ROOBS
     city: Köln
     country: Germany
     career_url: https://roobs.de/de/startseite/
     source_type: skip
+    notes: >-
+      No career-like link in the served HTML.
 
   - name: Precimmo
     city: Köln
     country: Germany
     career_url: https://precimmo.com
     source_type: skip
+    notes: >-
+      No career-like link in the served HTML.
 
   - name: Orthogen
     city: Düsseldorf
     country: Germany
     career_url: https://www.orthogen.org
     source_type: skip
+    notes: >-
+      No career-like link in the served HTML.
 
-  # Only /team.
   - name: "!mmunetrue"
     city: ''
     country: Germany
     career_url: https://www.immunetrue.eu
     source_type: skip
+    notes: >-
+      Homepage links only /team.
 
-  # TLS certificate does not cover this hostname, so every fetch fails
-  # verification. Not scrapable until they fix their certificate.
   - name: ToRa Pharma
     city: Troisdorf
     country: Germany
     career_url: https://tora-pharma.de
     source_type: skip
+    notes: >-
+      TLS certificate does not cover this hostname, so every fetch fails
+      verification. Not scrapable until they fix their certificate.
 
   - name: NMVS Connect
     city: ''
     country: Germany
     career_url: https://www.nmvs-connect.com
     source_type: skip
+    notes: >-
+      No career-like link in the served HTML.
 
-# ── Considered and deliberately not added (Aug 2026 batch) ───────────────────
-#
-# Industry associations / networks, not employers. Their job pages advertise
-# member companies' roles, so every posting would be filed under the
-# association's name:
-#   Pharma Deutschland (Bonn)                     https://www.pharmadeutschland.de/der-verband/stellenangebote/
-#   PLCD Pharma-Lizenz-Club Deutschland e.V.      https://plcd.de/stellenausschreibungen/
-#   Forschungsvereinigung der Arzneimittel-
-#     Hersteller e.V. (FAH, Bonn)                 https://fah-bonn.de/?page_id=1085
-#   LifeScienceNet Düsseldorf                     (no website recorded)
-#
-# Already covered elsewhere in the pipeline:
-#   Cellex Cell Professionals   → "Cellex" above (recruitee, slug cellexgmbh)
-#   Klosterfrau Group           → "Klosterfrau" in nrw_major_employers.yaml (successfactors)
-#   MCM Klosterfrau Vertriebsgesellschaft mbH → same group as Klosterfrau
-#   Lonza Cologne               → "Lonza" in nrw_major_employers.yaml
-#   Viatris (Troisdorf)         → "Viatris" in nrw_major_employers.yaml
+# The record of which source-list companies were considered and deliberately
+# NOT added — associations, recruiters, duplicates — lives in
+# input_data/companies_excluded.yaml. It is kept in a separate file because
+# scripts/sync_companies_from_sheet.py rewrites this one from the sheet and
+# drops every comment in it.

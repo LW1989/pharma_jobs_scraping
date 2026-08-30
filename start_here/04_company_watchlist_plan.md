@@ -555,8 +555,20 @@ re-inserted it. It now re-raises; an unreadable JS-rendered page raises
 wasteful for pages that change monthly. `_fetch_html_llm` hashes the stripped page
 text into the new `company_page_state` table; on a match the employer's active rows
 come back from the DB and are marked re-seen. Any DB error is a cache miss, so the
-smoke scripts still run without a database. `COMPANY_PAGE_HASH_CACHE=0` forces full
-re-extraction; `diagnose_pipeline_churn.py` disables it outright.
+smoke scripts still run without a database — but the first such miss logs at
+WARNING, because a missing table would otherwise disable the cache silently
+forever. `deploy/run_pipeline.sh` runs `scripts/migrate_db.py` (idempotent) before
+the pipeline so the table exists. A cached listing is re-extracted anyway after
+`COMPANY_PAGE_CACHE_MAX_DAYS` (default 7) so a bad extraction cannot be
+re-confirmed indefinitely. `COMPANY_PAGE_HASH_CACHE=0` forces full re-extraction;
+`diagnose_pipeline_churn.py` disables it outright.
+
+**Rationales live in fields, not comments.** `scripts/sync_companies_from_sheet.py`
+rewrites `companies.yaml` with `yaml.dump` and drops every comment, so each `skip`
+row carries a `notes:` string instead — an unknown key, which the merge
+(`merged = dict(existing)`) preserves and the runner ignores. The record of
+companies deliberately *not* added lives in `input_data/companies_excluded.yaml`,
+which the sync never touches.
 
 ### Validation
 

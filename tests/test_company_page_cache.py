@@ -19,6 +19,7 @@ for _var in ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"):
 
 from scraper import company_scraper as cs  # noqa: E402
 from scraper import config  # noqa: E402
+from datetime import date, timedelta  # noqa: E402
 
 COMPANY = {
     "name": "Testco",
@@ -35,6 +36,12 @@ PAGE = (
     "</body></html>"
 )
 
+# Same page with one opening added — the case the cache must NOT swallow.
+CHANGED_PAGE = PAGE.replace(
+    "</body></html>",
+    "<p>Neu: Regulatory Affairs Manager (m/w/d), Standort Koeln.</p></body></html>",
+)
+
 DB_ROW = {
     "job_id": "abc123",
     "title": "Qualified Person (m/w/d)",
@@ -44,8 +51,9 @@ DB_ROW = {
 
 
 class _FakeResponse:
-    text = PAGE
-    url = COMPANY["career_url"]
+    def __init__(self, text=PAGE):
+        self.text = text
+        self.url = COMPANY["career_url"]
 
     def raise_for_status(self):
         return None
@@ -58,10 +66,18 @@ class _FakeListing:
         self.location = location
 
 
-def _install(monkeypatch, *, stored_hash, rows, llm_calls, stored):
-    monkeypatch.setattr(cs, "_get_html_career_response", lambda url: _FakeResponse())
+def _install(monkeypatch, *, stored_hash, rows, llm_calls, stored,
+             page=PAGE, checked_on=None):
+    monkeypatch.setattr(
+        cs, "_get_html_career_response", lambda url: _FakeResponse(page)
+    )
     monkeypatch.setattr(cs, "_fetch_detail_text", lambda url, career_url: "")
-    monkeypatch.setattr(cs.db, "get_company_page_hash", lambda name: stored_hash)
+    state = (
+        None if stored_hash is None
+        else {"page_hash": stored_hash,
+              "checked_on": checked_on or date.today()}
+    )
+    monkeypatch.setattr(cs.db, "get_company_page_state", lambda name: state)
     monkeypatch.setattr(cs.db, "get_active_jobs_for_employer", lambda src, name: rows)
     monkeypatch.setattr(
         cs.db, "set_company_page_hash",
@@ -69,22 +85,58 @@ def _install(monkeypatch, *, stored_hash, rows, llm_calls, stored):
     )
 
     def fake_llm(page_text, career_url):
-        llm_calls.append(career_url)
+        llm_calls.append(page_text)
         return [_FakeListing("Regulatory Affairs Manager")]
 
     monkeypatch.setattr(cs, "_extract_listings_with_llm", fake_llm)
 
 
-def _page_hash(monkeypatch):
-    """The hash fetch_jobs will compute for PAGE, taken from a cold run."""
+def _hash_of(monkeypatch, page):
+    """Hash the implementation records for a given page, via a cold run."""
     calls, stored = [], []
-    _install(monkeypatch, stored_hash=None, rows=[], llm_calls=calls, stored=stored)
+    _install(monkeypatch, stored_hash=None, rows=[], llm_calls=calls,
+             stored=stored, page=page)
     cs.fetch_jobs(COMPANY)
     return stored[0][1]
 
 
+def test_different_pages_hash_differently(monkeypatch):
+    # Pins the hash to the page CONTENT. Without this, a constant hash — under
+    # which the LLM would never run again — satisfies every other test here.
+    assert _hash_of(monkeypatch, PAGE) != _hash_of(monkeypatch, CHANGED_PAGE)
+
+
+def test_edited_page_re_extracts_rather_than_reusing_the_cache(monkeypatch):
+    stale = _hash_of(monkeypatch, PAGE)
+
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=stale, rows=[DB_ROW], llm_calls=calls,
+             stored=stored, page=CHANGED_PAGE)
+
+    jobs = cs.fetch_jobs(COMPANY)
+
+    assert len(calls) == 1, "a changed page must not be served from the cache"
+    assert "Regulatory Affairs Manager" in calls[0]
+    assert [j["title"] for j in jobs] == ["Regulatory Affairs Manager"]
+
+
+def test_cache_expires_so_a_bad_extraction_cannot_persist(monkeypatch):
+    page_hash = _hash_of(monkeypatch, PAGE)
+    stale_date = date.today() - timedelta(
+        days=config.COMPANY_PAGE_CACHE_MAX_DAYS + 1
+    )
+
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW],
+             llm_calls=calls, stored=stored, checked_on=stale_date)
+
+    cs.fetch_jobs(COMPANY)
+
+    assert len(calls) == 1, "an unchanged page must still be re-extracted eventually"
+
+
 def test_unchanged_page_skips_the_llm_and_reuses_db_rows(monkeypatch):
-    page_hash = _page_hash(monkeypatch)
+    page_hash = _hash_of(monkeypatch, PAGE)
 
     calls, stored = [], []
     _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW],
@@ -116,7 +168,7 @@ def test_changed_page_runs_the_llm_and_records_the_new_hash(monkeypatch):
 
 
 def test_matching_hash_with_no_active_rows_still_extracts(monkeypatch):
-    page_hash = _page_hash(monkeypatch)
+    page_hash = _hash_of(monkeypatch, PAGE)
 
     calls, stored = [], []
     _install(monkeypatch, stored_hash=page_hash, rows=[], llm_calls=calls, stored=stored)
@@ -134,7 +186,7 @@ def test_db_failure_is_a_cache_miss_not_an_error(monkeypatch):
     def boom(*args, **kwargs):
         raise OSError("could not connect to server")
 
-    monkeypatch.setattr(cs.db, "get_company_page_hash", boom)
+    monkeypatch.setattr(cs.db, "get_company_page_state", boom)
     monkeypatch.setattr(cs.db, "set_company_page_hash", boom)
 
     jobs = cs.fetch_jobs(COMPANY)
@@ -144,7 +196,7 @@ def test_db_failure_is_a_cache_miss_not_an_error(monkeypatch):
 
 
 def test_cache_can_be_disabled(monkeypatch):
-    page_hash = _page_hash(monkeypatch)
+    page_hash = _hash_of(monkeypatch, PAGE)
 
     calls, stored = [], []
     _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW],

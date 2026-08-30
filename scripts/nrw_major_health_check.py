@@ -75,7 +75,8 @@ MIN_EXPECTED: dict[str, int] = {
     "Medtronic": 5,
     "Syneos Health": 8,
     "Fortrea": 5,
-    # Germany-wide Workday board narrowed to NRW by the eligibility pass.
+    # Germany-wide Workday board; the probe runs the fetcher, so this counts
+    # NRW-eligible jobs rather than raw listing rows.
     "Viatris": 3,
 }
 
@@ -228,7 +229,7 @@ def check_employer(row: dict) -> CheckResult:
         elif st == "workday_cxs":
             status, n = probe_workday_cxs_job_count(row)
             detail = (
-                f"Workday CXS listings ({row.get('workday_cxs_host', '')}"
+                f"Workday CXS eligible jobs ({row.get('workday_cxs_host', '')}"
                 f"/{row.get('workday_cxs_site', '')})"
             )
             err = None if n >= 0 else status
