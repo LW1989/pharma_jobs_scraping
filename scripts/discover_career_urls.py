@@ -94,6 +94,32 @@ NEGATIVE = re.compile(
     re.IGNORECASE,
 )
 
+# A link to one of these is definitive regardless of its anchor text, and must
+# not be penalised for pointing off-site — an ATS board is the thing we want.
+ATS_HOST = re.compile(
+    r"(personio\.(de|com)|recruitee\.com|workable\.com|join\.com|talent-soft\.com|"
+    r"softgarden\.(io|de)|greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|"
+    r"myworkdayjobs\.com|successfactors\.(com|eu)|jobs\.sap\.com|rexx-systems\.com|"
+    r"dvinci-hr\.com|concludis\.de|jobvector\.de|onlyfy\.jobs|prescreen\.io|"
+    r"teamtailor\.com|d-vinci\.de)",
+    re.IGNORECASE,
+)
+ATS_BONUS = 4
+OFFSITE_PENALTY = 4
+# Above the best a keyword link can reach (10 + 3), so a hosted board outranks
+# the company's own /karriere page: there is a structured fetcher for the board
+# and only LLM extraction for the page.
+ATS_FLOOR = 13
+
+
+def _registrable(netloc: str) -> str:
+    """
+    Last two labels of a hostname — enough to tell jobs.acme.de from acme.de's
+    perspective apart from an unrelated host. These are all .de/.com/.eu
+    companies, so no public-suffix handling is needed.
+    """
+    return ".".join(netloc.lower().split(":")[0].split(".")[-2:])
+
 
 def _clean_url(url: str) -> str:
     """Drop fragments and ad-tracking query params."""
@@ -114,23 +140,33 @@ def _clean_url(url: str) -> str:
 def _score_link(href: str, text: str, base_netloc: str) -> int:
     if NEGATIVE.search(href):
         return 0
-    haystack_path = urlparse(href).path.lower() + " " + (urlparse(href).query or "").lower()
+
+    parsed = urlparse(href)
+    host = parsed.netloc.lower()
+    # The hostname carries as much signal as the path: jobs.acme.de and
+    # acme-gmbh.jobs.personio.de both say "career page" on their own.
+    haystack_url = f"{host}{parsed.path.lower()} {(parsed.query or '').lower()}"
     haystack_text = (text or "").strip().lower()
 
     score = 0
     for pattern, points in KEYWORD_SCORES:
-        in_path = bool(re.search(pattern, haystack_path, re.IGNORECASE))
+        in_url = bool(re.search(pattern, haystack_url, re.IGNORECASE))
         in_text = bool(re.search(pattern, haystack_text, re.IGNORECASE))
-        if in_path or in_text:
-            # A keyword in the URL path is far stronger evidence than link text,
+        if in_url or in_text:
+            # A keyword in the URL is far stronger evidence than link text,
             # which is often a generic nav label.
-            score = max(score, points + (3 if in_path else 0))
+            score = max(score, points + (3 if in_url else 0))
 
-    if not score:
+    on_ats = bool(ATS_HOST.search(host))
+    if on_ats:
+        # join.com/companies/{slug} carries no keyword at all, but is decisive.
+        score = max(score, ATS_FLOOR) + ATS_BONUS
+    elif not score:
         return 0
-    if urlparse(href).netloc and urlparse(href).netloc != base_netloc:
-        score -= 4          # off-site (an ATS subdomain still wins on keyword strength)
-    return score
+    elif host and _registrable(host) != _registrable(base_netloc):
+        score -= OFFSITE_PENALTY
+
+    return max(score, 0)
 
 
 def discover(name: str, website: str) -> list[tuple[int, str, str]]:
