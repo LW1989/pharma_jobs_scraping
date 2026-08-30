@@ -1735,6 +1735,186 @@ def fetch_fortrea_clinical(company: dict) -> list[dict]:
     return jobs
 
 
+# ---------------------------------------------------------------------------
+# Generic Workday CXS (the JSON API behind every *.myworkdayjobs.com board)
+# ---------------------------------------------------------------------------
+#
+# Same endpoints the Fortrea fetcher uses, parameterised by tenant so any
+# Workday board can be read without Playwright. YAML keys:
+#
+#   workday_cxs_host      viatris.wd5.myworkdayjobs.com   (or derived from
+#                         workday_url / workday_cxs_tenant + workday_cxs_wd)
+#   workday_cxs_tenant    viatris
+#   workday_cxs_site      External
+#   workday_cxs_locale    de-DE          (front-end locale for the public URL)
+#   workday_cxs_facets    {Country: [<facet id>]}   passed through as appliedFacets
+#   workday_cxs_queries   ["", "Troisdorf"]         searchText values to union
+#   workday_cxs_max_list_jobs / workday_cxs_page_size / max_jobs
+
+
+def _workday_cxs_host(company: dict) -> str:
+    host = (company.get("workday_cxs_host") or "").strip()
+    if host:
+        return host.replace("https://", "").replace("http://", "").strip("/")
+    workday_url = (company.get("workday_url") or "").strip()
+    if workday_url:
+        return urlparse(workday_url).netloc
+    tenant = (company.get("workday_cxs_tenant") or "").strip()
+    wd = str(company.get("workday_cxs_wd") or "").strip()
+    if tenant and wd:
+        return f"{tenant}.{wd}.myworkdayjobs.com"
+    raise ValueError(
+        "workday_cxs needs workday_cxs_host, workday_url, "
+        "or workday_cxs_tenant + workday_cxs_wd"
+    )
+
+
+def _workday_cxs_base(company: dict) -> str:
+    tenant = (company.get("workday_cxs_tenant") or "").strip()
+    site = (company.get("workday_cxs_site") or "").strip()
+    if not tenant or not site:
+        raise ValueError("workday_cxs needs workday_cxs_tenant and workday_cxs_site")
+    return f"https://{_workday_cxs_host(company)}/wday/cxs/{tenant}/{site}"
+
+
+def _workday_cxs_search(
+    company: dict,
+    search_text: str,
+    *,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list[dict], int]:
+    payload = {
+        "appliedFacets": dict(company.get("workday_cxs_facets") or {}),
+        "limit": limit,
+        "offset": offset,
+        "searchText": search_text or "",
+    }
+    resp = _SESSION.post(
+        f"{_workday_cxs_base(company)}/jobs",
+        json=payload,
+        timeout=config.REQUEST_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return list(data.get("jobPostings") or []), int(data.get("total") or 0)
+
+
+def _workday_cxs_detail(company: dict, external_path: str) -> dict:
+    path = external_path if external_path.startswith("/") else f"/{external_path}"
+    resp = _SESSION.get(
+        f"{_workday_cxs_base(company)}{path}",
+        timeout=config.REQUEST_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    return resp.json().get("jobPostingInfo") or {}
+
+
+def _workday_cxs_public_url(company: dict, external_path: str, info: dict) -> str:
+    """Prefer the URL Workday itself advertises; otherwise rebuild the site URL."""
+    external = (info.get("externalUrl") or "").strip()
+    if external:
+        return external
+    path = external_path if external_path.startswith("/") else f"/{external_path}"
+    locale = (company.get("workday_cxs_locale") or "en-US").strip()
+    site = (company.get("workday_cxs_site") or "").strip()
+    return f"https://{_workday_cxs_host(company)}/{locale}/{site}{path}"
+
+
+def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
+    max_list = int(company.get("workday_cxs_max_list_jobs", 150))
+    page_size = int(company.get("workday_cxs_page_size", 20))
+    queries: list[str] = list(company.get("workday_cxs_queries") or [""])
+
+    seen_paths: set[str] = set()
+    ordered: list[dict] = []
+    for query in queries:
+        offset = 0
+        total = 0
+        while offset < max_list:
+            try:
+                batch, total = _workday_cxs_search(
+                    company, query, offset=offset, limit=page_size
+                )
+            except Exception as exc:
+                logger.warning("%s workday_cxs search %r: %s", employer, query, exc)
+                break
+            if not batch:
+                break
+            new = 0
+            for posting in batch:
+                path = (posting.get("externalPath") or "").strip()
+                if not path or path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                ordered.append(posting)
+                new += 1
+            logger.info(
+                "%s workday_cxs %r offset %d: +%d new (total %d, remote total %d)",
+                employer, query, offset, new, len(ordered), total,
+            )
+            if len(ordered) >= max_list:
+                return ordered[:max_list]
+            offset += page_size
+            if offset >= total:
+                break
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+    return ordered[:max_list]
+
+
+def probe_workday_cxs_job_count(company: dict) -> tuple[str, int]:
+    employer = company.get("name", "workday_cxs")
+    try:
+        return "ok", len(_workday_cxs_collect_refs(company, employer))
+    except Exception as exc:
+        return str(exc)[:120], -1
+
+
+def fetch_workday_cxs(company: dict) -> list[dict]:
+    employer = company["name"]
+    max_jobs = int(
+        company.get("max_jobs", company.get("workday_cxs_max_list_jobs", 150))
+    )
+    scoped = bool(company.get("listing_nrw_scoped"))
+    jobs: list[dict] = []
+
+    try:
+        refs = _workday_cxs_collect_refs(company, employer)
+        logger.info("%s workday_cxs: %d listing ref(s)", employer, len(refs))
+        for posting in refs:
+            if len(jobs) >= max_jobs:
+                break
+            external_path = (posting.get("externalPath") or "").strip()
+            if not external_path:
+                continue
+
+            # Skip the detail GET for rows the listing already rules out.
+            loc_snip = (posting.get("locationsText") or "").strip()
+            if not scoped and not listing_row_worth_detail_fetch(loc_snip):
+                continue
+
+            try:
+                info = _workday_cxs_detail(company, external_path)
+            except Exception as exc:
+                logger.debug("workday_cxs job %s: %s", external_path, exc)
+                continue
+
+            title = (info.get("title") or posting.get("title") or "").strip()
+            loc = _fortrea_location_from_detail(info) or loc_snip
+            body = _fortrea_html_to_text(info.get("jobDescription") or "")[:12000]
+            job_url = _workday_cxs_public_url(company, external_path, info)
+            if not job_url or not title:
+                continue
+            if not job_eligible_for_employer(company, loc, body, title=title):
+                continue
+            jobs.append(_build_row(employer, title, job_url, loc[:200], body))
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+        logger.info("%s workday_cxs: %d eligible job(s)", employer, len(jobs))
+    except Exception as exc:
+        logger.warning("workday_cxs %s: %s", employer, exc)
+    return jobs
+
+
 def fetch_jobs_for_employer(company: dict) -> list[dict]:
     st = company.get("source_type", "")
     if st == "smartrecruiters":
@@ -1747,6 +1927,8 @@ def fetch_jobs_for_employer(company: dict) -> list[dict]:
         return fetch_lanxess_portal(company)
     if st == "workday":
         return fetch_workday_playwright(company)
+    if st == "workday_cxs":
+        return fetch_workday_cxs(company)
     if st == "ucb":
         return fetch_ucb_playwright(company)
     if st == "henkel_portal":
