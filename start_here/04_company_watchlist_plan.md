@@ -454,3 +454,99 @@ the sheet. This avoids accidental overwrites from automated runs.
 
 - **German job listings:** Several companies (Dolorgiet, AdhexPharma, Enzymaster) list
   jobs in German. The existing LLM evaluator handles German natively — no change needed.
+
+---
+
+## Added Aug 2026 — Köln / Düsseldorf / Bonn batch (48 companies)
+
+From a hand-researched list of 59 organisations in the Köln–Düsseldorf–Bonn–Bergisch
+region, none of which appear on pharmiweb.jobs. Watchlist size went 44 → 92.
+
+### 30 with a researched career page
+
+| Company | City | `source_type` | Notes |
+|---|---|---|---|
+| Cannamedical | Köln | `html` | merged with the separate Cannamedical Biotech row |
+| enua | Köln | `join` | join.com board — see the new source type below |
+| FARCO-PHARMA | Köln | `html` | the source list's *website* column is already the career page |
+| Semdor Pharma Group | Köln | `html` | group parent of PB Pharma |
+| Altamedics | Köln | `html` | |
+| Medical CNBS Pharma | Köln | `html` | `jobboerse.php` |
+| BOLDER Arzneimittel | Köln | `html` | |
+| Singleron Biotechnologies | Köln | `html` | |
+| Togontech | Köln | `html` | |
+| Numaferm | Düsseldorf | `html` | |
+| Dynavax | Düsseldorf | `html` | URL typo "opportunites" is Dynavax's own |
+| Cellavent Healthcare | Düsseldorf | `html` | Shopify; `_su_rec*` tracking params stripped |
+| Hifas da Terra Germany | Düsseldorf | `html` | Shopify; `gclid`/`gad_*` stripped |
+| Mycannabis | Düsseldorf | `html` | |
+| good healthcare pharma | Düsseldorf | `html` | `job.goodhealthcare.com` — likely a hosted ATS |
+| SubstiCare | Düsseldorf | `html` | |
+| Hal Allergie | Düsseldorf | `html` | Talentsoft board; server-rendered ASP.NET |
+| Schantl Pharma Service | Düsseldorf | `html` | |
+| LAMPseq Diagnostics | Bonn | `html` | |
+| Medios Solutions | Bonn | `html` | `career.medios.group` — likely a hosted ATS |
+| I&L Biosystems | Troisdorf | `html` | `jobs.il-biosystems.com` — likely a hosted ATS |
+| CellSystems | Troisdorf | `html` | |
+| Miltenyi Biomedicine | Bergisch Gladbach | `html` | distinct entity from Miltenyi Biotec (NRW majors) |
+| PS Pharma Service | Meerbusch | `html` | |
+| J&K Consulting | Rommerskirchen | `html` | |
+| ANSAL Integrated Pharma Solutions | Solingen | `html` | |
+| Pharma Gerke | Grevenbroich | `html` | |
+| Active Pharma | Krefeld | `html` | |
+| Biomera | — | `html` | no city in the source list |
+| EUBOS | — | `html` | no city in the source list |
+
+### 18 with only a homepage → `source_type: skip`
+
+Qualistery, MEDPERION, Cannaflos, Axiogenesis, The Healthonauts, Refoxy Pharma,
+VitrofluidiX, IBSA Germany, PB Pharma, ABclonal Technology (Europe), AIRA Pharm,
+SynBiotic Distribution, ROOBS, !mmunetrue, Precimmo, Orthogen, ToRa Pharma,
+NMVS Connect.
+
+Run `python scripts/discover_career_urls.py` to rank the career-ish links on each
+homepage; it prints YAML-ready rows and writes nothing. Flip a row to `html` once
+its URL is confirmed. Axiogenesis was absorbed into Ncardia — expect a dead domain.
+
+### Not added
+
+Four industry associations (Pharma Deutschland, PLCD e.V., FAH e.V.,
+LifeScienceNet Düsseldorf) whose job pages advertise member companies' roles: every
+posting would be filed under the association's name. Reasons are recorded in a
+comment block at the end of `companies.yaml`.
+
+Five rows were already covered — Cellex here; Klosterfrau, Lonza and Viatris in
+`nrw_major_employers.yaml`.
+
+### New `source_type: join`
+
+join.com renders its listings client-side, so the `html` path sees nothing usable.
+`_fetch_join` reads the schema.org JSON-LD first, then `__NEXT_DATA__`, and falls
+back to the `html` path if join.com changes shape.
+`sync_companies_from_sheet.py` detects `join.com/companies/{slug}` URLs.
+
+### Two guardrails this batch required
+
+**Failed fetches no longer delist.** `fetch_jobs()` used to swallow every exception
+and return `[]`, which `run_company_checker.py` cannot tell apart from "no openings"
+— a timeout deactivated the employer's whole job set, and the next successful run
+re-inserted it. It now re-raises; an unreadable JS-rendered page raises
+`CompanyFetchError` instead of reporting zero jobs. The runner's existing
+`total_failed` path finally fires.
+
+**Unchanged pages skip the LLM.** 92 companies × one `gpt-5-mini` call per day is
+wasteful for pages that change monthly. `_fetch_html_llm` hashes the stripped page
+text into the new `company_page_state` table; on a match the employer's active rows
+come back from the DB and are marked re-seen. Any DB error is a cache miss, so the
+smoke scripts still run without a database. `COMPANY_PAGE_HASH_CACHE=0` forces full
+re-extraction; `diagnose_pipeline_churn.py` disables it outright.
+
+### Validation
+
+```bash
+python scripts/test_all_companies.py --name "Numaferm"   # single company, 1 LLM call
+python scripts/test_all_companies.py                     # full sweep, no DB writes
+```
+
+Companies returning 0 because the page is JS-rendered now surface as errors rather
+than silent zeros — give them a dedicated fetcher or `source_type: skip`.

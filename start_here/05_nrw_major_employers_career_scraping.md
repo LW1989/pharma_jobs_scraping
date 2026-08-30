@@ -178,3 +178,27 @@ Use these URLs as the **reference inventory** for “how many roles the site sho
 | UCB | 13 Monheim | Keyword filter; scroll helps discover links. |
 | Henkel | 91 NRW | Full portal + NRW text on page — should approach **~91** if copy names sites. |
 | Bayer | 61 | **`bayer_eightfold`** fetcher uses the same API as the [NW, Germany careers page](https://bayer.eightfold.ai/careers?query=&location=NW%2C%20Germany&hl=de). |
+### Added Aug 2026 — Viatris + generic Workday CXS
+
+| Employer | `source_type` | Notes |
+|----------|---------------|-------|
+| **Viatris** | `workday_cxs` | `viatris.wd5` External board via the CXS JSON API; German `Country` facet + `Troisdorf` search; NRW narrowed by the default `nrw` eligibility profile |
+
+`workday_cxs` generalises the JSON path the Fortrea fetcher already used
+(`/wday/cxs/{tenant}/{site}/jobs`) into a tenant-parameterised fetcher, so a
+Workday board can be read without Playwright. YAML keys: `workday_cxs_host`
+(or `workday_url`, or `workday_cxs_tenant` + `workday_cxs_wd`),
+`workday_cxs_tenant`, `workday_cxs_site`, `workday_cxs_locale`,
+`workday_cxs_facets` (passed through as `appliedFacets`), `workday_cxs_queries`,
+`workday_cxs_max_list_jobs`, `workday_cxs_page_size`, `max_jobs`.
+Listing rows are prefiltered with `listing_row_worth_detail_fetch` before the
+detail GET when `listing_nrw_scoped` is false.
+
+It is a candidate to replace the Playwright `workday` path for QIAGEN, Covestro,
+Evonik and Medtronic — none of them switched over yet.
+
+**Lonza Cologne is not enabled.** The board at `lonza.com/careers/job-search`
+could not be identified without network access, so `nrw_major_employers.yaml`
+carries a commented entry with both candidate configurations (Workday CXS and
+SuccessFactors) and what to verify. Uncomment one and add a `MIN_EXPECTED` row
+in `scripts/nrw_major_health_check.py`.
