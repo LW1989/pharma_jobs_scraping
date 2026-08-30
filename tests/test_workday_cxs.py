@@ -230,3 +230,154 @@ def test_max_jobs_caps_the_result(monkeypatch):
 def test_dispatcher_routes_workday_cxs(monkeypatch):
     monkeypatch.setattr(nmf, "fetch_workday_cxs", lambda company: ["sentinel"])
     assert nmf.fetch_jobs_for_employer({"source_type": "workday_cxs"}) == ["sentinel"]
+
+
+def _paged(pool, page_size=20):
+    def search(company, q, *, offset=0, limit=page_size):
+        return pool[offset:offset + limit], len(pool)
+    return search
+
+
+def test_paging_is_bounded_by_pages_not_by_rows_collected(monkeypatch):
+    # collected_here only advances for NEW paths, so a query returning rows the
+    # previous one already gave us would otherwise page to the remote total.
+    board = [{"externalPath": f"/job/DE/R{i}", "locationsText": "M"} for i in range(2000)]
+    company = {
+        **VIATRIS,
+        "workday_cxs_queries": ["", "A"],
+        "workday_cxs_max_list_jobs": 120,
+        "workday_cxs_page_size": 20,
+    }
+    pages = []
+
+    def search(c, q, *, offset=0, limit=20):
+        pages.append((q, offset))
+        pool = board if q == "" else board[:40] * 50   # all duplicates
+        return pool[offset:offset + limit], 2000
+
+    monkeypatch.setattr(nmf, "_workday_cxs_search", search)
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    nmf._workday_cxs_collect_refs(company, "T")
+
+    dup_pages = [p for p in pages if p[0] == "A"]
+    assert len(dup_pages) <= company.get("workday_cxs_max_listing_pages", 10), (
+        f"duplicate-only query issued {len(dup_pages)} requests"
+    )
+
+
+def test_payload_drift_raises_rather_than_reporting_an_empty_board(monkeypatch):
+    # Rows come back, but externalPath is gone: an empty list here would delist
+    # the employer's entire job set.
+    renamed = [{"jobPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"} for i in range(50)]
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(renamed))
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    with pytest.raises(nmf.WorkdayCxsFetchError):
+        nmf.fetch_workday_cxs(VIATRIS)
+
+
+def test_mostly_failing_detail_fetches_raise_instead_of_returning_a_short_list(monkeypatch):
+    postings = [{"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"}
+                for i in range(20)]
+    good = {
+        "title": "QA Manager", "location": "Troisdorf",
+        "country": {"descriptor": "Germany"},
+        "jobDescription": "<p>Standort Troisdorf, Nordrhein-Westfalen.</p>",
+    }
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(postings))
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    def mostly_broken(company, path):
+        if path == "/job/DE/R0":
+            return good
+        raise ConnectionError("503")
+
+    monkeypatch.setattr(nmf, "_workday_cxs_detail", mostly_broken)
+
+    with pytest.raises(nmf.WorkdayCxsFetchError):
+        nmf.fetch_workday_cxs(VIATRIS)
+
+
+def test_every_detail_request_is_throttled_not_just_the_ones_that_yield_a_job(monkeypatch):
+    postings = [{"externalPath": f"/job/DE/R{i}", "locationsText": "München"}
+                for i in range(10)]
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(postings))
+    monkeypatch.setattr(
+        nmf, "_workday_cxs_detail",
+        lambda c, p: {"title": "Sales", "location": "München",
+                      "country": {"descriptor": "Germany"},
+                      "jobDescription": "<p>Standort München, Bayern.</p>"},
+    )
+    sleeps = []
+    monkeypatch.setattr(nmf.time, "sleep", lambda s: sleeps.append(s))
+
+    assert nmf.fetch_workday_cxs(VIATRIS) == []
+    assert len(sleeps) >= 10, f"only {len(sleeps)} sleeps for 10 detail GETs"
+
+
+def test_probe_reports_eligible_jobs_not_raw_listing_rows(monkeypatch):
+    # MIN_EXPECTED is an NRW number; probing the country-wide listing would
+    # report ~120 and "ok" while the fetcher yields nothing.
+    postings = [{"externalPath": f"/job/DE/R{i}", "locationsText": "München"}
+                for i in range(30)]
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(postings))
+    monkeypatch.setattr(
+        nmf, "_workday_cxs_detail",
+        lambda c, p: {"title": "Sales", "location": "München",
+                      "country": {"descriptor": "Germany"},
+                      "jobDescription": "<p>Standort München, Bayern.</p>"},
+    )
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    status, n = nmf.probe_workday_cxs_job_count(VIATRIS)
+    assert (status, n) == ("ok", 0), f"probe counted listing rows: {n}"
+
+
+def test_probe_survives_a_row_without_a_name(monkeypatch):
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged([]))
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+    company = {k: v for k, v in VIATRIS.items() if k != "name"}
+
+    status, n = nmf.probe_workday_cxs_job_count(company)
+    assert (status, n) == ("ok", 0)
+
+
+def test_total_is_capped_even_when_a_whole_page_overshoots_the_budget(monkeypatch):
+    # A query takes whole pages, so the last one can push the union past
+    # max_list; the caller's max_jobs is a separate, later cap.
+    pool_a = [{"externalPath": f"/a/{i}", "locationsText": "M"} for i in range(100)]
+    pool_b = [{"externalPath": f"/b/{i}", "locationsText": "M"} for i in range(100)]
+    company = {
+        **VIATRIS,
+        "workday_cxs_queries": ["a", "b"],
+        "workday_cxs_max_list_jobs": 25,
+        "workday_cxs_page_size": 20,
+    }
+
+    def search(c, q, *, offset=0, limit=20):
+        pool = pool_a if q == "a" else pool_b
+        return pool[offset:offset + limit], len(pool)
+
+    monkeypatch.setattr(nmf, "_workday_cxs_search", search)
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    refs = nmf._workday_cxs_collect_refs(company, "T")
+    assert len(refs) == 25, f"max_list not enforced: {len(refs)}"
+
+
+def test_more_queries_than_the_budget_still_collects(monkeypatch):
+    # max_list // len(queries) floors to 0 with many queries; without the
+    # page_size floor every query gets a zero budget and nothing is fetched.
+    pool = [{"externalPath": f"/x/{i}", "locationsText": "Troisdorf"} for i in range(50)]
+    company = {
+        **VIATRIS,
+        "workday_cxs_queries": [f"q{i}" for i in range(30)],
+        "workday_cxs_max_list_jobs": 20,
+        "workday_cxs_page_size": 20,
+    }
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(pool))
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    refs = nmf._workday_cxs_collect_refs(company, "T")
+    assert len(refs) == 20, f"per-query budget starved every query: {len(refs)}"

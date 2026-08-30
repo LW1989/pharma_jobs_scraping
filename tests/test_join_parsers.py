@@ -137,3 +137,51 @@ def test_the_richest_record_wins_regardless_of_payload_order():
 
     assert len(jobs) == 1
     assert jobs[0]["url"].endswith("/1-qa")
+
+
+STUB_RICHER_PAGE = """
+<html><body><script id="__NEXT_DATA__" type="application/json">
+{"props":{
+  "similarJobs":[{"title":"QA Manager","url":"https://join.com/x/99",
+                  "location":"Berlin","description":"stub"}],
+  "jobs":[{"title":"QA Manager","url":"https://join.com/companies/enua/1-qa",
+           "description":"the real posting"}]}}
+</script></body></html>
+"""
+
+TWO_CITIES_PAGE = """
+<html><body><script id="__NEXT_DATA__" type="application/json">
+{"props":{"jobs":[
+  {"title":"QA Manager","url":"https://join.com/1","location":"Köln"},
+  {"title":"QA Manager","url":"https://join.com/2","location":"Bonn"}]}}
+</script></body></html>
+"""
+
+NESTED_PAGE = """
+<html><body><script id="__NEXT_DATA__" type="application/json">
+{"blocks":[[{"jobs":[{"title":"Buried Job","url":"https://join.com/deep"}]}]]}
+</script></body></html>
+"""
+
+
+def test_a_primary_list_beats_a_stub_that_carries_more_fields():
+    # The stub has a location the real posting omits, so "most filled fields"
+    # picks it — and location feeds job_id.
+    jobs = _jobs_from_next_data(STUB_RICHER_PAGE)
+
+    assert len(jobs) == 1, jobs
+    assert jobs[0]["url"] == "https://join.com/companies/enua/1-qa"
+    assert jobs[0]["details"] == "the real posting"
+    assert jobs[0]["location"] == ""
+
+
+def test_two_real_postings_sharing_a_title_both_survive():
+    # job_id is md5(name|title|location), so these are two distinct DB rows.
+    jobs = _jobs_from_next_data(TWO_CITIES_PAGE)
+
+    assert {j["location"] for j in jobs} == {"Köln", "Bonn"}
+    assert {j["url"] for j in jobs} == {"https://join.com/1", "https://join.com/2"}
+
+
+def test_lists_nested_inside_lists_are_still_walked():
+    assert [j["title"] for j in _jobs_from_next_data(NESTED_PAGE)] == ["Buried Job"]

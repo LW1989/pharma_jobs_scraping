@@ -404,6 +404,14 @@ def _jobs_from_jsonld(html: str) -> list[dict]:
     return out
 
 
+# "similarJobs"/"recommendedJobs" blocks carry stubs of postings listed
+# elsewhere on the page. They match the job-ish key test, so they are read, but
+# a primary list always wins over them.
+_SECONDARY_JOB_KEY_RE = re.compile(
+    r"similar|related|recommend|suggest|other|viewed|nearby", re.IGNORECASE
+)
+
+
 def _next_data_record(item: dict) -> dict | None:
     """One candidate job from a __NEXT_DATA__ node, or None if it has no title."""
     title = str(item.get("title") or item.get("name") or "").strip()
@@ -420,6 +428,40 @@ def _next_data_record(item: dict) -> dict | None:
     }
 
 
+def _dedupe_next_data_records(
+    candidates: list[tuple[bool, dict]],
+) -> list[dict]:
+    """
+    Collapse stubs into the postings they shadow, without losing real jobs.
+
+    Two rules, in order:
+      1. If a title appears in a primary list, every copy of it from a
+         "similar jobs" block is dropped — a stub can carry MORE fields than
+         the posting it shadows (a location the real row omits), so richness
+         alone picks the wrong one.
+      2. Within what remains for that title, postings are distinct when their
+         (location, url) differ. Collapsing on title alone would drop a second
+         genuine opening — and System A's job_id is md5(name|title|location),
+         so those are two separate DB rows.
+    """
+    primary_titles = {
+        rec["title"].lower() for is_primary, rec in candidates if is_primary
+    }
+
+    out: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for is_primary, rec in candidates:
+        key_title = rec["title"].lower()
+        if not is_primary and key_title in primary_titles:
+            continue
+        identity = (key_title, rec["location"].lower(), rec["url"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        out.append(rec)
+    return out
+
+
 def _jobs_from_next_data(html: str) -> list[dict]:
     """
     Best-effort walk of a Next.js __NEXT_DATA__ payload.
@@ -427,11 +469,6 @@ def _jobs_from_next_data(html: str) -> list[dict]:
     Looks for any list held under a job-ish key whose items are dicts carrying a
     title. Shapes differ between join.com releases, so every field is optional
     except the title.
-
-    A page usually carries the same title more than once — a real posting under
-    "jobs" and a bare stub under "similarJobs"/"recommendedJobs". Traversal
-    order decides nothing: candidates are deduped by title keeping the richest
-    record, so the stub can never displace the posting it shadows.
     """
     match = _NEXT_DATA_RE.search(html)
     if not match:
@@ -441,8 +478,7 @@ def _jobs_from_next_data(html: str) -> list[dict]:
     except (ValueError, TypeError):
         return []
 
-    best: dict[str, dict] = {}
-    order: list[str] = []
+    candidates: list[tuple[bool, dict]] = []
     stack = [(None, data)]
     while stack:
         key, node = stack.pop()
@@ -451,24 +487,23 @@ def _jobs_from_next_data(html: str) -> list[dict]:
             continue
         if not isinstance(node, list):
             continue
-        job_ish = bool(key and _JOB_LIST_KEY_RE.search(str(key)))
+        key_text = str(key or "")
+        job_ish = bool(key and _JOB_LIST_KEY_RE.search(key_text))
+        is_primary = job_ish and not _SECONDARY_JOB_KEY_RE.search(key_text)
         for item in node:
+            if isinstance(item, list):
+                # Lists nested in lists still have to be walked.
+                stack.append((key, item))
+                continue
             if not isinstance(item, dict):
                 continue
             record = _next_data_record(item) if job_ish else None
             if record is None:
                 stack.append((key, item))
                 continue
-            dedup_key = record["title"].lower()
-            filled = sum(1 for f in ("url", "location", "details") if record[f])
-            if dedup_key not in best:
-                best[dedup_key] = record
-                order.append(dedup_key)
-            elif filled > sum(
-                1 for f in ("url", "location", "details") if best[dedup_key][f]
-            ):
-                best[dedup_key] = record
-    return [best[k] for k in order]
+            candidates.append((is_primary, record))
+
+    return _dedupe_next_data_records(candidates)
 
 
 def _fetch_join(company: dict) -> list[dict]:
@@ -584,7 +619,13 @@ def _cached_listing_for_unchanged_page(company: dict, page_hash: str) -> list[di
 
         checked_on = state.get("checked_on")
         age_days = (date.today() - checked_on).days if checked_on else None
-        if age_days is None or age_days >= config.COMPANY_PAGE_CACHE_MAX_DAYS:
+        # A negative age means a clock skew wrote a future date; re-extract
+        # rather than trusting the row until that date passes.
+        if (
+            age_days is None
+            or age_days < 0
+            or age_days >= config.COMPANY_PAGE_CACHE_MAX_DAYS
+        ):
             logger.info(
                 "  %s: cached listing is %s day(s) old — re-extracting",
                 name, age_days,

@@ -1825,6 +1825,21 @@ def _workday_cxs_public_url(company: dict, external_path: str) -> str:
     return f"https://{_workday_cxs_host(company)}/{locale}/{site}{path}"
 
 
+# A listing that returns rows but no usable paths is schema drift, not an empty
+# board; tolerate a few flaky detail fetches but not a systemic outage.
+_WORKDAY_CXS_MAX_DETAIL_FAILURE_RATIO = 0.2
+
+
+class WorkdayCxsFetchError(RuntimeError):
+    """
+    The board could not be read.
+
+    Distinct from "the board lists nothing eligible": run_nrw_major_checker.py
+    delists every active row an employer's fetch does not return, so a partial
+    or failed read must never surface as a short list.
+    """
+
+
 def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
     """
     Union the configured searches, giving each its own budget.
@@ -1832,29 +1847,45 @@ def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
     A shared budget consumed in query order lets a broad search starve the
     targeted ones that follow — with queries ['', 'Troisdorf'] and a cap of
     120, a German board with more than 120 postings never runs 'Troisdorf' at
-    all. Each query therefore gets max_list // len(queries), and the total is
-    capped afterwards.
+    all. Each query therefore gets at least one page and at most
+    max_list // len(queries), and the total is capped afterwards. Because the
+    floor is a whole page, a query can overshoot its share by up to
+    page_size - 1; ordering still decides which query fills first when the
+    floor binds.
 
-    A failing search raises rather than returning what it has: a short listing
-    is indistinguishable from a shrinking one to the caller, and the caller
-    delists everything it does not see.
+    Paging is bounded by pages, not by rows collected: a query whose results
+    are all already-seen never advances its row budget, and a schema change
+    that hides externalPath advances nothing at all — either would otherwise
+    page to the remote total (hundreds of requests).
+
+    Raises rather than returning a short list: the caller delists whatever it
+    does not see.
     """
     max_list = int(company.get("workday_cxs_max_list_jobs", 150))
     page_size = int(company.get("workday_cxs_page_size", 20))
+    max_pages = int(company.get("workday_cxs_max_listing_pages", 10))
     queries: list[str] = list(company.get("workday_cxs_queries") or [""])
     per_query = max(page_size, max_list // max(len(queries), 1))
 
     seen_paths: set[str] = set()
     ordered: list[dict] = []
+    rows_returned = 0
     for query in queries:
         offset = 0
+        pages = 0
         collected_here = 0
-        while collected_here < per_query and len(ordered) < max_list:
+        while (
+            pages < max_pages
+            and collected_here < per_query
+            and len(ordered) < max_list
+        ):
             batch, total = _workday_cxs_search(
                 company, query, offset=offset, limit=page_size
             )
+            pages += 1
             if not batch:
                 break
+            rows_returned += len(batch)
             new = 0
             for posting in batch:
                 path = (posting.get("externalPath") or "").strip()
@@ -1865,9 +1896,9 @@ def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
                 new += 1
                 collected_here += 1
             logger.info(
-                "%s workday_cxs %r offset %d: +%d new (query %d/%d, total %d, "
-                "remote total %d)",
-                employer, query, offset, new, collected_here, per_query,
+                "%s workday_cxs %r page %d offset %d: +%d new (query %d/%d, "
+                "total %d, remote total %d)",
+                employer, query, pages, offset, new, collected_here, per_query,
                 len(ordered), total,
             )
             offset += page_size
@@ -1876,6 +1907,12 @@ def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
             time.sleep(config.REQUEST_DELAY_SECONDS)
         if len(ordered) >= max_list:
             break
+
+    if rows_returned and not ordered:
+        raise WorkdayCxsFetchError(
+            f"{employer}: listing returned {rows_returned} row(s) but no usable "
+            "externalPath — the CXS payload shape has changed"
+        )
     return ordered[:max_list]
 
 
@@ -1895,10 +1932,11 @@ def probe_workday_cxs_job_count(company: dict) -> tuple[str, int]:
 
 def fetch_workday_cxs(company: dict) -> list[dict]:
     """
-    Raises on a listing failure — an empty return means "the board lists
-    nothing eligible", and run_nrw_major_checker.py delists on that.
+    Raises on a listing failure, on payload drift, and when detail fetches fail
+    systemically — an empty return means "the board lists nothing eligible",
+    and run_nrw_major_checker.py delists on that.
     """
-    employer = company["name"]
+    employer = company.get("name", "workday_cxs")
     max_jobs = int(
         company.get("max_jobs", company.get("workday_cxs_max_list_jobs", 150))
     )
@@ -1928,6 +1966,11 @@ def fetch_workday_cxs(company: dict) -> list[dict]:
             detail_failures += 1
             logger.debug("workday_cxs job %s: %s", external_path, exc)
             continue
+        finally:
+            # Throttle every detail request, not just the ones that produced a
+            # job: a country-wide board with no eligible roles would otherwise
+            # issue its whole detail burst back to back.
+            time.sleep(config.REQUEST_DELAY_SECONDS)
 
         title = (info.get("title") or posting.get("title") or "").strip()
         loc = _fortrea_location_from_detail(info) or (
@@ -1940,11 +1983,15 @@ def fetch_workday_cxs(company: dict) -> list[dict]:
         if not job_eligible_for_employer(company, loc, body, title=title):
             continue
         jobs.append(_build_row(employer, title, job_url, loc[:200], body))
-        time.sleep(config.REQUEST_DELAY_SECONDS)
 
-    if detail_attempts and detail_failures == detail_attempts:
-        raise RuntimeError(
-            f"{employer}: all {detail_attempts} workday_cxs detail fetch(es) failed"
+    if detail_failures and (
+        detail_failures >= max(
+            1, int(detail_attempts * _WORKDAY_CXS_MAX_DETAIL_FAILURE_RATIO)
+        )
+    ):
+        raise WorkdayCxsFetchError(
+            f"{employer}: {detail_failures} of {detail_attempts} workday_cxs "
+            "detail fetch(es) failed — refusing to report a partial listing"
         )
 
     logger.info("%s workday_cxs: %d eligible job(s)", employer, len(jobs))

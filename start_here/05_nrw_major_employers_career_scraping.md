@@ -202,9 +202,21 @@ Deliberate design points, each of which was a bug first:
   `max_list // len(queries)`. With one shared budget a broad query starves the
   targeted ones that follow it — `['', 'Troisdorf']` on a board with more than
   `max_list` postings never ran `Troisdorf` at all.
-- **Raises on a listing failure.** An empty return means "nothing eligible",
-  and `run_nrw_major_checker.py` delists everything it does not see. A 5xx must
-  not look like an empty board. Also raises when every detail fetch fails.
+- **Raises rather than reporting a partial listing** (`WorkdayCxsFetchError`).
+  An empty or short return means "nothing eligible", and
+  `run_nrw_major_checker.py` delists every active row it does not see. So the
+  fetcher raises on a listing 5xx, when the listing returns rows carrying no
+  usable `externalPath` (payload drift), and when detail fetches fail at 20%
+  or more — one flaky request is tolerated, a systemic outage is not.
+- **Paging is bounded by pages, not rows** (`workday_cxs_max_listing_pages`,
+  default 10). The per-query row budget only advances on *new* paths, so a
+  query whose results are all already-seen, or a schema change that hides
+  `externalPath`, would otherwise page to the remote total — measured at 200
+  requests where the original bound gave 12.
+- **Every detail request is throttled**, not only the ones that yield a job: a
+  country-wide board with no eligible roles would otherwise issue its whole
+  detail burst back to back. `max_jobs` counts eligible jobs, so it does not
+  cap detail traffic; `workday_cxs_max_list_jobs` does.
 - **`job_id` never depends on `externalUrl`.** `_build_row` hashes the URL, so
   a server-optional field would re-key the same posting between runs and churn
   it out of and back into the digest. The URL is derived from `externalPath`.

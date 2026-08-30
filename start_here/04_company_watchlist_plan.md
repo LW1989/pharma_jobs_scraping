@@ -542,6 +542,14 @@ join.com renders its listings client-side, so the `html` path sees nothing usabl
 back to the `html` path if join.com changes shape.
 `sync_companies_from_sheet.py` detects `join.com/companies/{slug}` URLs.
 
+The `__NEXT_DATA__` walk has three rules that each fix a way it lost jobs:
+a posting in a primary list always beats a same-titled stub from a
+`similarJobs`/`recommendedJobs` block (a stub can carry *more* fields than the
+posting it shadows, so "richest wins" alone picks wrong); postings are only
+collapsed when title, location *and* URL match, because `job_id` is
+`md5(name|title|location)` and two same-titled roles in different cities are two
+real rows; and lists nested inside lists are still walked.
+
 ### Two guardrails this batch required
 
 **Failed fetches no longer delist.** `fetch_jobs()` used to swallow every exception

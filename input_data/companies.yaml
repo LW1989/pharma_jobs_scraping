@@ -356,9 +356,11 @@ companies:
     career_url: https://www.bolder.de/karriere
     source_type: html
 
-  # Source list records no city.
+  # Source list records no city; Köln is the company's own stated location.
+  # Left blank, _build_job would fall back to "Germany", which both weakens the
+  # location the evaluator sees and re-keys job_id (md5 of name|title|location).
   - name: Singleron Biotechnologies
-    city: ''
+    city: Köln
     country: Germany
     career_url: https://singleron.bio/careers/
     source_type: html

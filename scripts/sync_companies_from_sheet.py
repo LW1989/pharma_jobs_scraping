@@ -1,8 +1,8 @@
 """
 Sync input_data/companies.yaml from the Google Sheet company watchlist.
 
-Run this manually whenever you add or edit companies in the sheet.
-It is NOT part of the daily cron chain.
+Run this whenever you add or edit companies in the sheet. deploy/run_pipeline.sh
+also runs it nightly (non-fatally) before run_company_checker.py.
 
 Usage:
     python scripts/sync_companies_from_sheet.py
@@ -221,10 +221,17 @@ def main() -> None:
     merged: dict[str, dict] = dict(existing)
 
     for old, new in changed:
-        merged[old["name"]].update({
-            "career_url":  new["career_url"],
-            "source_type": new["source_type"],
-        })
+        update = {"career_url": new["career_url"], "source_type": new["source_type"]}
+        if old.get("source_type") == "skip":
+            # A skip row was disabled deliberately — usually because the page has
+            # no listing at all (see its notes:). A cosmetic URL change in the
+            # sheet must not silently turn scraping back on.
+            update.pop("source_type")
+            logger.info(
+                "  ! %s stays source_type: skip (URL changed in sheet; "
+                "re-enable by hand if it now has a career page)", old["name"],
+            )
+        merged[old["name"]].update(update)
         if new.get("slug"):
             merged[old["name"]]["slug"] = new["slug"]
         elif "slug" in merged[old["name"]] and not new.get("slug"):

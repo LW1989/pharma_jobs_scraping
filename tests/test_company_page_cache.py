@@ -206,3 +206,47 @@ def test_cache_can_be_disabled(monkeypatch):
     cs.fetch_jobs(COMPANY)
 
     assert len(calls) == 1
+
+
+def test_a_future_checked_on_does_not_pin_the_cache(monkeypatch):
+    # Clock skew writing a future date must not freeze the listing until then.
+    page_hash = _hash_of(monkeypatch, PAGE)
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW], llm_calls=calls,
+             stored=stored, checked_on=date.today() + timedelta(days=365))
+
+    cs.fetch_jobs(COMPANY)
+
+    assert len(calls) == 1
+
+
+def test_cache_unavailability_is_reported_once_at_warning(monkeypatch, caplog):
+    # A missing company_page_state table disables the cache for every company;
+    # at DEBUG that is invisible at the runner's INFO level.
+    import logging
+
+    monkeypatch.setattr(cs, "_PAGE_CACHE_WARNED", False)
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=None, rows=[], llm_calls=calls, stored=stored)
+
+    def boom(*a, **kw):
+        raise OSError('relation "company_page_state" does not exist')
+
+    monkeypatch.setattr(cs.db, "get_company_page_state", boom)
+    monkeypatch.setattr(cs.db, "set_company_page_hash", boom)
+
+    with caplog.at_level(logging.WARNING, logger=cs.logger.name):
+        cs.fetch_jobs(COMPANY)
+        cs.fetch_jobs(COMPANY)
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1, [r.message for r in warnings]
+    assert "migrate_db" in warnings[0].getMessage()
+
+
+def test_job_id_distinguishes_two_postings_that_differ_only_by_location():
+    # The property the join.com dedup rests on, and what makes a blank city
+    # churn a company's rows.
+    a = cs._make_job_id("Testco", "QA Manager", "Köln")
+    b = cs._make_job_id("Testco", "QA Manager", "Bonn")
+    assert a != b

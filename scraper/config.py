@@ -31,16 +31,43 @@ REPORTER_DRY_RUN = os.environ.get("REPORTER_DRY_RUN", "").lower() in (
     "yes",
 )
 
+def env_flag(raw: str | None, default: bool) -> bool:
+    """
+    Parse a boolean .env value. Unset or blank falls back to the default; an
+    unrecognised value does too, rather than silently reading as False.
+    """
+    value = (raw or "").strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+def env_int(raw: str | None, default: int) -> int:
+    """
+    Parse an integer .env value, falling back to the default.
+
+    A typo must not raise at import time: scraper.config is imported by every
+    runner, so a ValueError here takes down the whole pipeline.
+    """
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 # Company watchlist: skip the listing LLM call when a career page's text is
-# byte-identical to the previous run. Set to 0 to force a full re-extraction.
-COMPANY_PAGE_HASH_CACHE = os.environ.get(
-    "COMPANY_PAGE_HASH_CACHE", "1"
-).strip().lower() in ("1", "true", "yes")
+# byte-identical to the previous run. 1/true/yes/on enable it (the default),
+# 0/false/no/off force a full re-extraction.
+COMPANY_PAGE_HASH_CACHE = env_flag(
+    os.environ.get("COMPANY_PAGE_HASH_CACHE"), True
+)
 
 # …but re-extract at least this often even when the page has not changed, so a
 # bad extraction cannot be re-confirmed from the DB indefinitely.
-COMPANY_PAGE_CACHE_MAX_DAYS = int(
-    os.environ.get("COMPANY_PAGE_CACHE_MAX_DAYS", "7")
+COMPANY_PAGE_CACHE_MAX_DAYS = env_int(
+    os.environ.get("COMPANY_PAGE_CACHE_MAX_DAYS"), 7
 )
 
 # Google Sheets API — required only for scripts/sync_companies_from_sheet.py
