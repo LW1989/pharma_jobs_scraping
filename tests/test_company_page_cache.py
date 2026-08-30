@@ -1,0 +1,156 @@
+"""
+The watchlist's career-page hash cache.
+
+Career pages change monthly while the checker runs daily, so an unchanged page
+must not cost another listing-extraction call. The cache is answered from the
+DB, and every DB failure has to degrade to a normal extraction — the smoke
+scripts run without a database.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+for _var in ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD"):
+    os.environ.setdefault(_var, "test")
+
+from scraper import company_scraper as cs  # noqa: E402
+from scraper import config  # noqa: E402
+
+COMPANY = {
+    "name": "Testco",
+    "city": "Köln",
+    "country": "Germany",
+    "career_url": "https://testco.example/karriere/",
+    "source_type": "html",
+}
+
+PAGE = (
+    "<html><body><h1>Karriere</h1>"
+    "<p>Wir suchen ab sofort einen Qualified Person (m/w/d) fuer unseren "
+    "Standort in Koeln. Bewerbungen an jobs@testco.example.</p>"
+    "</body></html>"
+)
+
+DB_ROW = {
+    "job_id": "abc123",
+    "title": "Qualified Person (m/w/d)",
+    "url": "https://testco.example/karriere/qp",
+    "location": "Köln",
+}
+
+
+class _FakeResponse:
+    text = PAGE
+    url = COMPANY["career_url"]
+
+    def raise_for_status(self):
+        return None
+
+
+class _FakeListing:
+    def __init__(self, title, url="", location=""):
+        self.title = title
+        self.url = url
+        self.location = location
+
+
+def _install(monkeypatch, *, stored_hash, rows, llm_calls, stored):
+    monkeypatch.setattr(cs, "_get_html_career_response", lambda url: _FakeResponse())
+    monkeypatch.setattr(cs, "_fetch_detail_text", lambda url, career_url: "")
+    monkeypatch.setattr(cs.db, "get_company_page_hash", lambda name: stored_hash)
+    monkeypatch.setattr(cs.db, "get_active_jobs_for_employer", lambda src, name: rows)
+    monkeypatch.setattr(
+        cs.db, "set_company_page_hash",
+        lambda name, page_hash: stored.append((name, page_hash)),
+    )
+
+    def fake_llm(page_text, career_url):
+        llm_calls.append(career_url)
+        return [_FakeListing("Regulatory Affairs Manager")]
+
+    monkeypatch.setattr(cs, "_extract_listings_with_llm", fake_llm)
+
+
+def _page_hash(monkeypatch):
+    """The hash fetch_jobs will compute for PAGE, taken from a cold run."""
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=None, rows=[], llm_calls=calls, stored=stored)
+    cs.fetch_jobs(COMPANY)
+    return stored[0][1]
+
+
+def test_unchanged_page_skips_the_llm_and_reuses_db_rows(monkeypatch):
+    page_hash = _page_hash(monkeypatch)
+
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW],
+             llm_calls=calls, stored=stored)
+
+    jobs = cs.fetch_jobs(COMPANY)
+
+    assert calls == []
+    assert [j["job_id"] for j in jobs] == ["abc123"]
+    assert jobs[0]["title"] == "Qualified Person (m/w/d)"
+    # Cached rows must be shaped like any other job dict, so insert_job would
+    # accept them if they ever reached it.
+    assert jobs[0]["source"] == "company_direct"
+    assert set(jobs[0]) == set(
+        cs._build_job(COMPANY, title="x", url="u", location="l")
+    )
+
+
+def test_changed_page_runs_the_llm_and_records_the_new_hash(monkeypatch):
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash="stale-hash", rows=[DB_ROW],
+             llm_calls=calls, stored=stored)
+
+    jobs = cs.fetch_jobs(COMPANY)
+
+    assert len(calls) == 1
+    assert [j["title"] for j in jobs] == ["Regulatory Affairs Manager"]
+    assert stored and stored[0][0] == "Testco"
+
+
+def test_matching_hash_with_no_active_rows_still_extracts(monkeypatch):
+    page_hash = _page_hash(monkeypatch)
+
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=page_hash, rows=[], llm_calls=calls, stored=stored)
+
+    cs.fetch_jobs(COMPANY)
+
+    # A page that gained its first listing between runs must not be missed.
+    assert len(calls) == 1
+
+
+def test_db_failure_is_a_cache_miss_not_an_error(monkeypatch):
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=None, rows=[], llm_calls=calls, stored=stored)
+
+    def boom(*args, **kwargs):
+        raise OSError("could not connect to server")
+
+    monkeypatch.setattr(cs.db, "get_company_page_hash", boom)
+    monkeypatch.setattr(cs.db, "set_company_page_hash", boom)
+
+    jobs = cs.fetch_jobs(COMPANY)
+
+    assert len(calls) == 1
+    assert [j["title"] for j in jobs] == ["Regulatory Affairs Manager"]
+
+
+def test_cache_can_be_disabled(monkeypatch):
+    page_hash = _page_hash(monkeypatch)
+
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW],
+             llm_calls=calls, stored=stored)
+    monkeypatch.setattr(config, "COMPANY_PAGE_HASH_CACHE", False)
+
+    cs.fetch_jobs(COMPANY)
+
+    assert len(calls) == 1

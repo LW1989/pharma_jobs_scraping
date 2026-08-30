@@ -31,6 +31,12 @@ REPORTER_DRY_RUN = os.environ.get("REPORTER_DRY_RUN", "").lower() in (
     "yes",
 )
 
+# Company watchlist: skip the listing LLM call when a career page's text is
+# byte-identical to the previous run. Set to 0 to force a full re-extraction.
+COMPANY_PAGE_HASH_CACHE = os.environ.get(
+    "COMPANY_PAGE_HASH_CACHE", "1"
+).lower() not in ("0", "false", "no")
+
 # Google Sheets API — required only for scripts/sync_companies_from_sheet.py
 GOOGLE_SHEET_ID         = os.environ.get("GOOGLE_SHEET_ID", "")
 GOOGLE_CREDENTIALS_FILE = os.environ.get(

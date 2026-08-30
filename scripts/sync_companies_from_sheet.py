@@ -68,6 +68,10 @@ def _detect_source_type(url: str) -> tuple[str, str | None]:
         # https://{slug}.recruitee.com
         m = re.search(r"https?://([^.]+)\.recruitee\.com", url, re.I)
         return "recruitee", (m.group(1) if m else None)
+    if "join.com" in u:
+        # https://join.com/companies/{slug}
+        m = re.search(r"join\.com/companies/([^/?#]+)", url, re.I)
+        return "join", (m.group(1) if m else None)
     if "myworkdayjobs.com" in u:
         return "html", None   # Workday has no public JSON API
     return "html", None
@@ -232,6 +236,9 @@ def main() -> None:
     # Write back preserving the file header comment
     header = (
         "# Company watchlist — NRW pharma/biotech companies with their own career pages.\n"
+        "#\n"
+        "# NOTE: this file was last written by sync_companies_from_sheet.py, which\n"
+        "# rewrites it from the sheet and therefore drops any hand-written comments.\n"
         "#\n"
         f"# Populated from: https://docs.google.com/spreadsheets/d/{__import__('scraper.config', fromlist=['config']).config.GOOGLE_SHEET_ID}\n"
         "# Keep up to date by running: python scripts/sync_companies_from_sheet.py\n\n"

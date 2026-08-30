@@ -5,6 +5,7 @@ Applies all schema changes needed for the evaluation module:
   1. Adds `passed_prescreening` column to the `jobs` table.
   2. Creates the `evaluation_runs` table.
   3. Adds `source` column to distinguish pharmiweb vs company_direct jobs.
+  4. Creates the `company_page_state` table (career-page hashes).
 
 Usage:
     python scripts/migrate_db.py
@@ -42,6 +43,16 @@ MIGRATIONS = [
         """
         ALTER TABLE jobs
           ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'pharmiweb'
+        """,
+    ),
+    (
+        "Create company_page_state table",
+        """
+        CREATE TABLE IF NOT EXISTS company_page_state (
+            employer    TEXT         PRIMARY KEY,
+            page_hash   VARCHAR(32)  NOT NULL,
+            checked_on  DATE         NOT NULL
+        )
         """,
     ),
     (

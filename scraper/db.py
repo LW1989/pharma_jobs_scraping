@@ -69,6 +69,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     should_apply    BOOLEAN      NOT NULL DEFAULT FALSE,
     applied         BOOLEAN      NOT NULL DEFAULT FALSE
 );
+
+-- MD5 of each watchlist career page's text on the last check. Lets the company
+-- checker skip the listing LLM call while a page is unchanged.
+CREATE TABLE IF NOT EXISTS company_page_state (
+    employer    TEXT         PRIMARY KEY,
+    page_hash   VARCHAR(32)  NOT NULL,
+    checked_on  DATE         NOT NULL
+);
 """
 
 
@@ -200,3 +208,42 @@ def deactivate_delisted_for_employer(
     if gone:
         mark_jobs_inactive(gone)
     return len(gone)
+
+
+def get_active_jobs_for_employer(source: str, employer: str) -> list[dict]:
+    """Active rows for one employer, with the fields a re-seen listing needs."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT job_id, title, url, location
+              FROM jobs
+             WHERE source = %s AND employer = %s AND job_active = TRUE
+            """,
+            (source, employer),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_company_page_hash(employer: str) -> str | None:
+    """Career-page text hash recorded on the previous check, if any."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT page_hash FROM company_page_state WHERE employer = %s",
+            (employer,),
+        )
+        row = cur.fetchone()
+        return row["page_hash"] if row else None
+
+
+def set_company_page_hash(employer: str, page_hash: str) -> None:
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO company_page_state (employer, page_hash, checked_on)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (employer) DO UPDATE
+               SET page_hash  = EXCLUDED.page_hash,
+                   checked_on = EXCLUDED.checked_on
+            """,
+            (employer, page_hash, date.today()),
+        )
