@@ -3,8 +3,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def env_flag(raw: str | None, default: bool) -> bool:
+    """
+    Parse a boolean .env value. Unset or blank falls back to the default; an
+    unrecognised value does too, rather than silently reading as False.
+    """
+    value = (raw or "").strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+def env_int(raw: str | None, default: int) -> int:
+    """
+    Parse an integer .env value, falling back to the default.
+
+    A typo must not raise at import time: scraper.config is imported by every
+    runner, so a ValueError here takes down the whole pipeline.
+    """
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 DB_HOST = os.environ["DB_HOST"]
-DB_PORT = int(os.environ.get("DB_PORT", 5432))
+DB_PORT = env_int(os.environ.get("DB_PORT"), 5432)
 DB_NAME = os.environ["DB_NAME"]
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]
@@ -15,7 +42,7 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
 
 # Email — required only when running run_reporter.py
 SMTP_HOST     = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
+SMTP_PORT     = env_int(os.environ.get("SMTP_PORT"), 587)
 SMTP_USER     = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 REPORT_TO     = os.environ.get("REPORT_TO", "")   # comma-separated recipients
@@ -25,10 +52,19 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # Local pipeline test: skip email/Telegram/mark_sent (run_reporter.py)
-REPORTER_DRY_RUN = os.environ.get("REPORTER_DRY_RUN", "").lower() in (
-    "1",
-    "true",
-    "yes",
+REPORTER_DRY_RUN = env_flag(os.environ.get("REPORTER_DRY_RUN"), False)
+
+# Company watchlist: skip the listing LLM call when a career page's text is
+# byte-identical to the previous run. 1/true/yes/on enable it (the default),
+# 0/false/no/off force a full re-extraction.
+COMPANY_PAGE_HASH_CACHE = env_flag(
+    os.environ.get("COMPANY_PAGE_HASH_CACHE"), True
+)
+
+# …but re-extract at least this often even when the page has not changed, so a
+# bad extraction cannot be re-confirmed from the DB indefinitely.
+COMPANY_PAGE_CACHE_MAX_DAYS = env_int(
+    os.environ.get("COMPANY_PAGE_CACHE_MAX_DAYS"), 7
 )
 
 # Google Sheets API — required only for scripts/sync_companies_from_sheet.py
@@ -83,9 +119,9 @@ REQUEST_TIMEOUT_SECONDS = 30
 
 # Company checker: some hosts advertise broken IPv6 (connect timeout from VPS).
 # Set COMPANY_SCRAPER_FORCE_IPV4=1 in .env to force IPv4 for all watchlist HTTP.
-COMPANY_SCRAPER_FORCE_IPV4 = os.environ.get(
-    "COMPANY_SCRAPER_FORCE_IPV4", ""
-).lower() in ("1", "true", "yes")
+COMPANY_SCRAPER_FORCE_IPV4 = env_flag(
+    os.environ.get("COMPANY_SCRAPER_FORCE_IPV4"), False
+)
 
 HEADERS = {
     "User-Agent": (

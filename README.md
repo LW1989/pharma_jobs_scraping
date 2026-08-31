@@ -33,13 +33,22 @@ pharma_jobs_scraping/
 
 ### 1. Clone and install
 
+**Requires Python 3.10 or newer** — the code uses `str | None` annotations,
+which older interpreters evaluate at runtime and reject with
+`TypeError: unsupported operand type(s) for |`. Check with `python3 -V`, and
+build the venv from a 3.10+ interpreter explicitly if your shell default (a
+conda `base`, say) is older.
+
 ```bash
 git clone <repo-url>
 cd pharma_jobs_scraping
-python -m venv .venv
+python3.12 -m venv .venv          # any python3.10+ will do
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+Always run the scripts through that venv (`source .venv/bin/activate` first, or
+call `.venv/bin/python …` directly) — not a system or conda `python`.
 
 ### 2. Start a local PostgreSQL database via Docker
 

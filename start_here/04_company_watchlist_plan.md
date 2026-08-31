@@ -454,3 +454,157 @@ the sheet. This avoids accidental overwrites from automated runs.
 
 - **German job listings:** Several companies (Dolorgiet, AdhexPharma, Enzymaster) list
   jobs in German. The existing LLM evaluator handles German natively — no change needed.
+
+---
+
+## Added Aug 2026 — Köln / Düsseldorf / Bonn batch (48 companies)
+
+From a hand-researched list of 59 organisations in the Köln–Düsseldorf–Bonn–Bergisch
+region, none of which appear on pharmiweb.jobs. Watchlist size went 44 → 92.
+
+### 30 with a researched career page
+
+| Company | City | `source_type` | Notes |
+|---|---|---|---|
+| Cannamedical | Köln | `html` | merged with the separate Cannamedical Biotech row |
+| enua | Köln | `join` | join.com board — see the new source type below |
+| FARCO-PHARMA | Köln | `html` | the source list's *website* column is already the career page |
+| Semdor Pharma Group | Köln | `html` | group parent of PB Pharma |
+| Altamedics | Köln | `html` | |
+| Medical CNBS Pharma | Köln | `html` | `jobboerse.php` |
+| BOLDER Arzneimittel | Köln | `html` | |
+| Singleron Biotechnologies | Köln | `html` | |
+| Togontech | Köln | `html` | |
+| Numaferm | Düsseldorf | `html` | |
+| Dynavax | Düsseldorf | `html` | URL typo "opportunites" is Dynavax's own |
+| Cellavent Healthcare | Düsseldorf | `html` | Shopify; `_su_rec*` tracking params stripped |
+| Hifas da Terra Germany | Düsseldorf | `html` | Shopify; `gclid`/`gad_*` stripped |
+| Mycannabis | Düsseldorf | `html` | |
+| good healthcare pharma | Düsseldorf | `html` | `job.goodhealthcare.com` — likely a hosted ATS |
+| SubstiCare | Düsseldorf | `html` | |
+| Hal Allergie | Düsseldorf | `html` | Talentsoft board; server-rendered ASP.NET |
+| Schantl Pharma Service | Düsseldorf | `html` | |
+| LAMPseq Diagnostics | Bonn | `html` | |
+| Medios Solutions | Bonn | `html` | `career.medios.group` — likely a hosted ATS |
+| I&L Biosystems | Troisdorf | `html` | `jobs.il-biosystems.com` — likely a hosted ATS |
+| CellSystems | Troisdorf | `html` | |
+| Miltenyi Biomedicine | Bergisch Gladbach | `html` | distinct entity from Miltenyi Biotec (NRW majors) |
+| PS Pharma Service | Meerbusch | `html` | |
+| J&K Consulting | Rommerskirchen | `html` | |
+| ANSAL Integrated Pharma Solutions | Solingen | `html` | |
+| Pharma Gerke | Grevenbroich | `html` | |
+| Active Pharma | Krefeld | `html` | |
+| Biomera | — | `html` | no city in the source list |
+| EUBOS | — | `html` | no city in the source list |
+
+### 18 with only a homepage → resolved by discovery
+
+`scripts/discover_career_urls.py` was run against all 18. It ranks the career-ish
+links on a homepage into three buckets (ready / weak / unresolved) and writes
+nothing. Outcome: **3 resolved, 15 left as `skip`**, each with the reason recorded
+inline in `companies.yaml`.
+
+| Company | Outcome |
+|---|---|
+| MEDPERION | `/en/karriere-bei-uns` → `html` |
+| PB Pharma | `/karriere/` → `html` |
+| SynBiotic Distribution | `/de/karriere` → `html` |
+| Cannaflos, Refoxy Pharma, !mmunetrue | only `/team` or `/about` — no listing |
+| Axiogenesis | only management-team pages; absorbed into Ncardia, site looks abandoned |
+| The Healthonauts | recruiting/interim-management firm — its applicant pages advertise client roles, so postings would be misattributed (same reason as the associations) |
+| ToRa Pharma | TLS certificate does not cover the hostname; every fetch fails verification |
+| Qualistery, VitrofluidiX, IBSA Germany, ABclonal, AIRA Pharm, ROOBS, Precimmo, Orthogen, NMVS Connect | no career-like link in the served HTML |
+
+Re-run the script if any of those sites is relaunched — it reads the `skip` rows
+straight out of `companies.yaml`, so it always checks exactly what is outstanding.
+
+Two things that first run taught the ranking, now fixed and covered by tests:
+a `team`/`about` link is never a job listing and no longer scores at all, and a
+best candidate below score 10 is printed as a `skip` row rather than a
+ready-to-paste one. Rows are also emitted through the YAML dumper — a name like
+`!mmunetrue` is a *tag* to a YAML parser unless quoted, and the hand-built row
+for it would have broken the file on paste.
+
+### Not added
+
+Four industry associations (Pharma Deutschland, PLCD e.V., FAH e.V.,
+LifeScienceNet Düsseldorf) whose job pages advertise member companies' roles: every
+posting would be filed under the association's name. Reasons are recorded in a
+comment block at the end of `companies.yaml`.
+
+Five rows were already covered — Cellex here; Klosterfrau, Lonza and Viatris in
+`nrw_major_employers.yaml`.
+
+### New `source_type: join`
+
+join.com renders its listings client-side, so the `html` path sees nothing usable.
+`_fetch_join` reads the schema.org JSON-LD first, then `__NEXT_DATA__`, and falls
+back to the `html` path if join.com changes shape.
+`sync_companies_from_sheet.py` detects `join.com/companies/{slug}` URLs.
+
+The `__NEXT_DATA__` walk has three rules that each fix a way it lost jobs:
+a posting in a primary list always beats a same-titled stub from a
+`similarJobs`/`recommendedJobs` block (a stub can carry *more* fields than the
+posting it shadows, so "richest wins" alone picks wrong); postings are only
+collapsed when title, location *and* URL match, because `job_id` is
+`md5(name|title|location)` and two same-titled roles in different cities are two
+real rows; and lists nested inside lists are still walked.
+
+### Two guardrails this batch required
+
+**Failed fetches no longer delist.** `fetch_jobs()` used to swallow every exception
+and return `[]`, which `run_company_checker.py` cannot tell apart from "no openings"
+— a timeout deactivated the employer's whole job set, and the next successful run
+re-inserted it. It now re-raises; an unreadable JS-rendered page raises
+`CompanyFetchError` instead of reporting zero jobs. The runner's existing
+`total_failed` path finally fires.
+
+**Unchanged pages skip the LLM.** 92 companies × one `gpt-5-mini` call per day is
+wasteful for pages that change monthly. `_fetch_html_llm` hashes the stripped page
+text into the new `company_page_state` table; on a match the employer's active rows
+come back from the DB and are marked re-seen. Any DB error is a cache miss, so the
+smoke scripts still run without a database — but the first such miss logs at
+WARNING, because a missing table would otherwise disable the cache silently
+forever. `deploy/run_pipeline.sh` runs `scripts/migrate_db.py` (idempotent) before
+the pipeline so the table exists. A cached listing is re-extracted anyway after
+`COMPANY_PAGE_CACHE_MAX_DAYS` (default 7) so a bad extraction cannot be
+re-confirmed indefinitely. `COMPANY_PAGE_HASH_CACHE=0` forces full re-extraction;
+`diagnose_pipeline_churn.py` disables it outright.
+
+**The sheet sync is the one thing that can undo all of this.** It runs nightly
+(`deploy/run_pipeline.sh`) immediately before the company checker and rewrites
+`companies.yaml` from the Google Sheet, so anything recorded only as a comment,
+or keyed only on a literal name, does not survive it. Three guards:
+
+- **Exclusions are enforced, not documented.** `_blocked_names()` reads
+  `companies_excluded.yaml` *and* `nrw_major_employers.yaml`, and refuses to add
+  any of those names. Without it, a sheet holding the full research list re-adds
+  all three industry associations, Cellex, Klosterfrau, Lonza and Viatris —
+  reversing two of the decisions this batch was built on, and scraping Viatris
+  and Klosterfrau twice under two `source` values and two `job_id` schemes.
+- **Names are matched on identity, not spelling.** `_normalise_name()` strips
+  legal forms and decorations so `BOLDER Arzneimittel GmbH & Co. KG`,
+  `Medical CNBS® Pharma GmbH` and `Singleron Biotechnologies HR` match their
+  watchlist entries instead of being added a second time. Where no rule can
+  bridge the gap (`Cannamedical Pharma`, `Medios Solutions Bonn`), the entry
+  carries an explicit `aliases:` list.
+- **A researched career URL is never walked back.** The sheet usually holds a
+  homepage or a section index; `is_less_specific()` keeps `/karriere/` over
+  `/`, `/en/karriere-bei-uns` over `/en`, and `/de/karriere` over `/de/home`.
+  Ad-tracking parameters are stripped before anything is compared or stored.
+
+**Rationales live in fields, not comments**, for the same reason: each `skip`
+row carries a `notes:` string, and `aliases:` sits beside it — unknown keys,
+which the merge (`merged = dict(existing)`) preserves and the runner ignores.
+The record of companies deliberately *not* added lives in
+`input_data/companies_excluded.yaml`, which the sync reads but never rewrites.
+
+### Validation
+
+```bash
+python scripts/test_all_companies.py --name "Numaferm"   # single company, 1 LLM call
+python scripts/test_all_companies.py                     # full sweep, no DB writes
+```
+
+Companies returning 0 because the page is JS-rendered now surface as errors rather
+than silent zeros — give them a dedicated fetcher or `source_type: skip`.

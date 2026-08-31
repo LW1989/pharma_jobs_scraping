@@ -1659,8 +1659,11 @@ def _fortrea_collect_job_refs(company: dict, employer: str) -> list[dict]:
                     query, offset=offset, limit=page_size
                 )
             except Exception as exc:
-                logger.warning("%s fortrea search %r: %s", employer, query, exc)
-                break
+                # Not swallowed: breaking here returns a short listing, and
+                # run_nrw_major_checker.py delists every row it does not see.
+                raise WorkdayCxsFetchError(
+                    f"{employer}: fortrea search {query!r} failed — {exc}"
+                ) from exc
             if not batch:
                 break
             new = 0
@@ -1731,7 +1734,302 @@ def fetch_fortrea_clinical(company: dict) -> list[dict]:
             time.sleep(config.REQUEST_DELAY_SECONDS)
         logger.info("%s fortrea: %d eligible job(s)", employer, len(jobs))
     except Exception as exc:
+        # Not swallowed: run_nrw_major_checker.py delists every active row this
+        # does not return, so a failed read must not look like an empty board.
         logger.warning("Fortrea %s: %s", employer, exc)
+        raise
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# Generic Workday CXS (the JSON API behind every *.myworkdayjobs.com board)
+# ---------------------------------------------------------------------------
+#
+# Same endpoints the Fortrea fetcher uses, parameterised by tenant so any
+# Workday board can be read without Playwright. YAML keys:
+#
+#   workday_cxs_host      viatris.wd5.myworkdayjobs.com   (or derived from
+#                         workday_url / workday_cxs_tenant + workday_cxs_wd)
+#   workday_cxs_tenant    viatris
+#   workday_cxs_site      External
+#   workday_cxs_locale    de-DE          (front-end locale for the public URL)
+#   workday_cxs_facets    {Country: [<facet id>]}   passed through as appliedFacets
+#   workday_cxs_queries   ["", "Troisdorf"]         searchText values to union
+#   workday_cxs_max_list_jobs   union cap across all queries
+#   workday_cxs_page_size       rows per request
+#   workday_cxs_max_listing_pages  page cap PER QUERY (default 10); raising it
+#                         is the fix when a query legitimately needs more pages
+#   max_jobs              cap on eligible jobs returned; anything beyond it is
+#                         delisted by the caller, so keep it >= the real count
+
+
+def _workday_cxs_host(company: dict) -> str:
+    host = (company.get("workday_cxs_host") or "").strip()
+    if host:
+        return host.replace("https://", "").replace("http://", "").strip("/")
+    workday_url = (company.get("workday_url") or "").strip()
+    if workday_url:
+        return urlparse(workday_url).netloc
+    tenant = (company.get("workday_cxs_tenant") or "").strip()
+    wd = str(company.get("workday_cxs_wd") or "").strip()
+    if tenant and wd:
+        return f"{tenant}.{wd}.myworkdayjobs.com"
+    raise ValueError(
+        "workday_cxs needs workday_cxs_host, workday_url, "
+        "or workday_cxs_tenant + workday_cxs_wd"
+    )
+
+
+def _workday_cxs_base(company: dict) -> str:
+    tenant = (company.get("workday_cxs_tenant") or "").strip()
+    site = (company.get("workday_cxs_site") or "").strip()
+    if not tenant or not site:
+        raise ValueError("workday_cxs needs workday_cxs_tenant and workday_cxs_site")
+    return f"https://{_workday_cxs_host(company)}/wday/cxs/{tenant}/{site}"
+
+
+def _workday_cxs_search(
+    company: dict,
+    search_text: str,
+    *,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list[dict], int]:
+    payload = {
+        "appliedFacets": dict(company.get("workday_cxs_facets") or {}),
+        "limit": limit,
+        "offset": offset,
+        "searchText": search_text or "",
+    }
+    resp = _SESSION.post(
+        f"{_workday_cxs_base(company)}/jobs",
+        json=payload,
+        timeout=config.REQUEST_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return list(data.get("jobPostings") or []), int(data.get("total") or 0)
+
+
+def _workday_cxs_detail(company: dict, external_path: str) -> dict:
+    path = external_path if external_path.startswith("/") else f"/{external_path}"
+    resp = _SESSION.get(
+        f"{_workday_cxs_base(company)}{path}",
+        timeout=config.REQUEST_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    return resp.json().get("jobPostingInfo") or {}
+
+
+def _workday_cxs_public_url(company: dict, external_path: str) -> str:
+    """
+    Rebuild the public site URL deterministically from the external path.
+
+    Deliberately does not use the payload's optional `externalUrl`: _build_row
+    hashes the URL into job_id, so a field the server may omit or vary between
+    runs would re-key the same posting and churn it out of and back into the
+    digest. Same approach as _fortrea_phenom_url.
+    """
+    path = external_path if external_path.startswith("/") else f"/{external_path}"
+    locale = (company.get("workday_cxs_locale") or "en-US").strip()
+    site = (company.get("workday_cxs_site") or "").strip()
+    return f"https://{_workday_cxs_host(company)}/{locale}/{site}{path}"
+
+
+# Detail fetches failing at this rate or above mean the board is not readable,
+# not that it has few jobs. Below it, the missing rows are delisted for a day
+# and come back on the next run; above it, a run would delist wholesale.
+_WORKDAY_CXS_MAX_DETAIL_FAILURE_RATIO = 0.2
+
+
+class WorkdayCxsFetchError(RuntimeError):
+    """
+    The board could not be read.
+
+    Distinct from "the board lists nothing eligible": run_nrw_major_checker.py
+    delists every active row an employer's fetch does not return, so a partial
+    or failed read must never surface as a short list.
+    """
+
+
+def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
+    """
+    Union the configured searches, giving each its own budget.
+
+    A shared budget consumed in query order lets a broad search starve the
+    targeted ones that follow — with queries ['', 'Troisdorf'] and a cap of
+    120, a German board with more than 120 postings never runs 'Troisdorf' at
+    all. Each query therefore gets at least one page and at most
+    max_list // len(queries), and the total is capped afterwards. Because the
+    floor is a whole page, a query can overshoot its share by up to
+    page_size - 1; ordering still decides which query fills first when the
+    floor binds.
+
+    Paging is bounded by pages, not by rows collected: a query whose results
+    are all already-seen never advances its row budget, and a schema change
+    that hides externalPath advances nothing at all — either would otherwise
+    page to the remote total (hundreds of requests).
+
+    Raises rather than returning a short list: the caller delists whatever it
+    does not see.
+    """
+    max_list = int(company.get("workday_cxs_max_list_jobs", 150))
+    page_size = int(company.get("workday_cxs_page_size", 20))
+    max_pages = int(company.get("workday_cxs_max_listing_pages", 10))
+    queries: list[str] = list(company.get("workday_cxs_queries") or [""])
+    per_query = max(page_size, max_list // max(len(queries), 1))
+
+    seen_paths: set[str] = set()
+    ordered: list[dict] = []
+    rows_returned = 0
+    for query in queries:
+        offset = 0
+        pages = 0
+        collected_here = 0
+        while (
+            pages < max_pages
+            and collected_here < per_query
+            and len(ordered) < max_list
+        ):
+            batch, total = _workday_cxs_search(
+                company, query, offset=offset, limit=page_size
+            )
+            pages += 1
+            if not batch:
+                break
+            rows_returned += len(batch)
+            new = 0
+            for posting in batch:
+                path = (posting.get("externalPath") or "").strip()
+                if not path or path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                ordered.append(posting)
+                new += 1
+                collected_here += 1
+            logger.info(
+                "%s workday_cxs %r page %d offset %d: +%d new (query %d/%d, "
+                "total %d, remote total %d)",
+                employer, query, pages, offset, new, collected_here, per_query,
+                len(ordered), total,
+            )
+            offset += page_size
+            # total == 0 alongside a non-empty batch means the server is not
+            # reporting a count; trust the batches instead of stopping at once.
+            if total > 0 and offset >= total:
+                break
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+        else:
+            # The while-condition ended the loop rather than a break. If that
+            # was the page cap while the query still had budget and unread
+            # results, we are truncating the board — and the caller delists
+            # every row it does not see.
+            if (
+                pages >= max_pages
+                and collected_here < per_query
+                and len(ordered) < max_list
+            ):
+                raise WorkdayCxsFetchError(
+                    f"{employer}: query {query!r} hit the {max_pages}-page cap "
+                    f"after {collected_here} of {per_query} rows — listing "
+                    "truncated (raise workday_cxs_max_listing_pages, or the "
+                    "board is not honouring offset)"
+                )
+        if len(ordered) >= max_list:
+            break
+
+    # Partial drift is as dangerous as total drift: half a listing still
+    # delists the half it dropped.
+    if rows_returned and len(ordered) < rows_returned / 2:
+        raise WorkdayCxsFetchError(
+            f"{employer}: only {len(ordered)} of {rows_returned} listing row(s) "
+            "carried a usable externalPath — the CXS payload shape has changed"
+        )
+    return ordered[:max_list]
+
+
+def probe_workday_cxs_job_count(company: dict) -> tuple[str, int]:
+    """
+    Count the jobs the fetcher would actually keep, not the raw listing size.
+
+    The listing is the whole country; MIN_EXPECTED is an NRW number, so probing
+    the listing would report ~120 and "ok" while the fetcher yields nothing.
+    Matches the smartrecruiters/eightfold branches, which also probe the fetcher.
+    """
+    try:
+        return "ok", len(fetch_workday_cxs(company))
+    except Exception as exc:
+        return str(exc)[:120], -1
+
+
+def fetch_workday_cxs(company: dict) -> list[dict]:
+    """
+    Raises on a listing failure, on payload drift, and when detail fetches fail
+    systemically — an empty return means "the board lists nothing eligible",
+    and run_nrw_major_checker.py delists on that.
+    """
+    employer = company.get("name", "workday_cxs")
+    max_jobs = int(
+        company.get("max_jobs", company.get("workday_cxs_max_list_jobs", 150))
+    )
+    jobs: list[dict] = []
+
+    refs = _workday_cxs_collect_refs(company, employer)
+    logger.info("%s workday_cxs: %d listing ref(s)", employer, len(refs))
+
+    detail_attempts = 0
+    detail_failures = 0
+    for posting in refs:
+        if len(jobs) >= max_jobs:
+            logger.warning(
+                "%s workday_cxs: stopping at max_jobs=%d with %d listing ref(s) "
+                "left — any eligible job beyond this cap will be delisted",
+                employer, max_jobs, len(refs) - refs.index(posting),
+            )
+            break
+        external_path = (posting.get("externalPath") or "").strip()
+        if not external_path:
+            continue
+
+        # No listing-level location prefilter here, deliberately: locationsText
+        # is an aggregate for multi-site postings, and the NRW helpers are a
+        # whitelist that drops whatever they do not recognise — which would
+        # discard rows the eligibility pass, reading the body, would accept.
+        # fetch_fortrea_clinical, the fetcher this mirrors, has none either.
+        detail_attempts += 1
+        try:
+            info = _workday_cxs_detail(company, external_path)
+        except Exception as exc:
+            detail_failures += 1
+            logger.debug("workday_cxs job %s: %s", external_path, exc)
+            continue
+        finally:
+            # Throttle every detail request, not just the ones that produced a
+            # job: a country-wide board with no eligible roles would otherwise
+            # issue its whole detail burst back to back.
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+
+        title = (info.get("title") or posting.get("title") or "").strip()
+        loc = _fortrea_location_from_detail(info) or (
+            posting.get("locationsText") or ""
+        ).strip()
+        body = _fortrea_html_to_text(info.get("jobDescription") or "")[:12000]
+        job_url = _workday_cxs_public_url(company, external_path)
+        if not job_url or not title:
+            continue
+        if not job_eligible_for_employer(company, loc, body, title=title):
+            continue
+        jobs.append(_build_row(employer, title, job_url, loc[:200], body))
+
+    if detail_attempts and (
+        detail_failures / detail_attempts >= _WORKDAY_CXS_MAX_DETAIL_FAILURE_RATIO
+    ):
+        raise WorkdayCxsFetchError(
+            f"{employer}: {detail_failures} of {detail_attempts} workday_cxs "
+            "detail fetch(es) failed — refusing to report a partial listing"
+        )
+
+    logger.info("%s workday_cxs: %d eligible job(s)", employer, len(jobs))
     return jobs
 
 
@@ -1747,6 +2045,8 @@ def fetch_jobs_for_employer(company: dict) -> list[dict]:
         return fetch_lanxess_portal(company)
     if st == "workday":
         return fetch_workday_playwright(company)
+    if st == "workday_cxs":
+        return fetch_workday_cxs(company)
     if st == "ucb":
         return fetch_ucb_playwright(company)
     if st == "henkel_portal":
@@ -1763,5 +2063,5 @@ def fetch_jobs_for_employer(company: dict) -> list[dict]:
         return fetch_syneos_clinical(company)
     if st == "fortrea_clinical":
         return fetch_fortrea_clinical(company)
-    logger.warning("Unknown NRW employer source_type: %s", st)
-    return []
+    # Returning [] here would delist the employer's whole job set over a typo.
+    raise ValueError(f"Unknown NRW employer source_type: {st!r}")

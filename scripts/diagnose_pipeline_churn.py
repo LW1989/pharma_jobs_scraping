@@ -23,7 +23,12 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from scraper import config  # noqa: E402
 from scraper.company_scraper import fetch_jobs  # noqa: E402
+
+# This tool exists to compare a real fetch against the DB, so the watchlist's
+# page-hash cache (which answers from the DB) would defeat the point.
+config.COMPANY_PAGE_HASH_CACHE = False
 from scraper.nrw_major_fetchers import fetch_jobs_for_employer  # noqa: E402
 
 NRW_YAML = ROOT / "input_data" / "nrw_major_employers.yaml"

@@ -4,10 +4,12 @@ Company watchlist scraper.
 Fetches open job listings from a curated list of NRW pharma/biotech companies
 that post on their own career pages rather than on pharmiweb.jobs.
 
-Supports four source_type modes:
+Supports five source_type modes:
   personio  — Personio XML feed  (https://{slug}.jobs.personio.de/xml)
   workable  — Workable JSON API  (https://apply.workable.com/api/v3/accounts/{slug}/jobs)
   recruitee — Recruitee JSON API (https://{slug}.recruitee.com/api/offers)
+  join      — join.com company page: schema.org JSON-LD, then __NEXT_DATA__,
+              then the html path as a last resort
   html      — Generic HTML fetch + OpenAI Structured Outputs listing extraction,
               followed by individual job-page fetch for full descriptions
 
@@ -26,8 +28,11 @@ Each returned job dict contains the keys needed by scraper.db.insert_job():
 """
 
 import hashlib
+import json
 import logging
+import re
 import time
+from datetime import date
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
@@ -36,9 +41,21 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 from pydantic import BaseModel
 
-from scraper import config
+from scraper import config, db
+from scraper.urls import canonical
 
 logger = logging.getLogger(__name__)
+
+
+class CompanyFetchError(RuntimeError):
+    """
+    The career page could not be read.
+
+    Distinct from a page that loaded fine and lists no openings: callers must
+    not treat this as "no jobs", or they will delist the employer's entire job
+    set and re-insert it on the next successful run.
+    """
+
 
 _SESSION = requests.Session()
 _SESSION.headers.update(config.HEADERS)
@@ -165,8 +182,12 @@ def fetch_jobs(company: dict) -> list[dict]:
     """
     Fetch all open job listings for a company.
 
-    Returns a list of partial job dicts ready for insert_job().
-    Returns an empty list if the page is unreachable or no jobs are found.
+    Returns a list of partial job dicts ready for insert_job(). An empty list
+    means the career page loaded and lists no openings.
+
+    Raises on any fetch or parse failure, so that callers can tell an
+    unreachable page apart from an empty one — run_company_checker.py delists
+    an employer's jobs on an empty result, which would be wrong for a failure.
     """
     source_type = company.get("source_type", "html")
     name = company.get("name", "Unknown")
@@ -181,6 +202,8 @@ def fetch_jobs(company: dict) -> list[dict]:
             jobs = _fetch_workable(company)
         elif source_type == "recruitee":
             jobs = _fetch_recruitee(company)
+        elif source_type == "join":
+            jobs = _fetch_join(company)
         elif source_type == "skip":
             logger.debug("Skipping %s (source_type=skip)", name)
             return []
@@ -190,9 +213,10 @@ def fetch_jobs(company: dict) -> list[dict]:
         logger.info("  %s: %d job(s) found", name, len(jobs))
         return jobs
 
-    except Exception as exc:
-        logger.warning("  %s: fetch failed — %s", name, exc)
-        return []
+    except Exception:
+        # Deliberately not swallowed: run_company_checker.py delists an
+        # employer's whole job set when a fetch comes back empty.
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +328,282 @@ def _fetch_recruitee(company: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# join.com company pages
+# ---------------------------------------------------------------------------
+
+_JSONLD_RE = re.compile(
+    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
+_NEXT_DATA_RE = re.compile(
+    r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
+_JOB_LIST_KEY_RE = re.compile(r"job|position|vacanc|opening", re.IGNORECASE)
+
+
+def _html_to_text(raw_html: str, limit: int = 6000) -> str:
+    if not raw_html:
+        return ""
+    return BeautifulSoup(raw_html, "lxml").get_text(separator="\n", strip=True)[:limit]
+
+
+def _jsonld_blocks(html: str) -> list:
+    """Yield every parsed application/ld+json payload, flattening @graph."""
+    blocks = []
+    for raw in _JSONLD_RE.findall(html):
+        try:
+            data = json.loads(raw.strip())
+        except (ValueError, TypeError):
+            continue
+        stack = [data]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, list):
+                stack.extend(item)
+            elif isinstance(item, dict):
+                if "@graph" in item:
+                    stack.append(item["@graph"])
+                blocks.append(item)
+    return blocks
+
+
+def _jsonld_location(posting: dict) -> str:
+    loc = posting.get("jobLocation")
+    if isinstance(loc, list):
+        loc = loc[0] if loc else None
+    if not isinstance(loc, dict):
+        return ""
+    address = loc.get("address")
+    if isinstance(address, str):
+        return address
+    if not isinstance(address, dict):
+        return ""
+    parts = [address.get("addressLocality"), address.get("addressRegion"),
+             address.get("addressCountry")]
+    parts = [p.get("name") if isinstance(p, dict) else p for p in parts]
+    return ", ".join(str(p) for p in parts if p)
+
+
+def _jobs_from_jsonld(html: str) -> list[dict]:
+    """Extract schema.org JobPosting entries: [{title, url, location, details}]."""
+    out = []
+    for block in _jsonld_blocks(html):
+        types = block.get("@type")
+        types = types if isinstance(types, list) else [types]
+        if "JobPosting" not in types:
+            continue
+        title = (block.get("title") or "").strip()
+        if not title:
+            continue
+        out.append({
+            "title": title,
+            "url": (block.get("url") or block.get("@id") or "").strip(),
+            "location": _jsonld_location(block),
+            "details": _html_to_text(block.get("description") or ""),
+        })
+    return out
+
+
+# "similarJobs"/"recommendedJobs" blocks carry stubs of postings listed
+# elsewhere on the page. They match the job-ish key test, so they are read, but
+# a primary list always wins over them.
+_SECONDARY_JOB_KEY_RE = re.compile(
+    r"similar|related|recommend|suggest|also[-_]?viewed|nearby|elsewhere",
+    re.IGNORECASE,
+)
+
+
+# Fields only a real posting carries. A category label ({"name": "Sales",
+# "jobs": [...]}) has none of them; a genuine posting that merely lists related
+# roles ({"title": "RA Manager", "url": ..., "similarJobs": [...]}) has at least
+# one, so it must not be mistaken for a container and dropped.
+_POSTING_FIELDS = ("url", "link", "permalink", "description", "descriptionHtml",
+                   "location", "city")
+
+
+def _is_job_container(item: dict) -> bool:
+    """
+    True when this dict only groups other jobs rather than being one itself.
+
+    Category nodes look like a job — {"name": "Engineering", "jobs": [...]} has
+    a name — so the group label would be filed as an opening and the real jobs
+    beneath it hidden behind it. But a real posting may itself carry a job-ish
+    sub-list (similarJobs, relatedPositions); it is told apart by having posting
+    fields of its own.
+    """
+    has_job_sublist = any(
+        _JOB_LIST_KEY_RE.search(str(key))
+        and isinstance(value, list)
+        and any(isinstance(v, dict) for v in value)
+        for key, value in item.items()
+    )
+    if not has_job_sublist:
+        return False
+    has_own_posting_fields = any(
+        str(item.get(f) or "").strip() for f in _POSTING_FIELDS
+    )
+    return not has_own_posting_fields
+
+
+def _next_data_record(item: dict) -> dict | None:
+    """One candidate job from a __NEXT_DATA__ node, or None if it has no title."""
+    if _is_job_container(item):
+        return None
+    title = str(item.get("title") or item.get("name") or "").strip()
+    if not title:
+        return None
+    return {
+        "title": title,
+        "url": str(item.get("url") or item.get("link")
+                   or item.get("permalink") or "").strip(),
+        "location": str(item.get("location") or item.get("city") or "").strip(),
+        "details": _html_to_text(
+            item.get("description") or item.get("descriptionHtml") or ""
+        ),
+    }
+
+
+def _dedupe_next_data_records(
+    candidates: list[tuple[bool, dict]],
+) -> list[dict]:
+    """
+    Collapse stubs into the postings they shadow, without losing real jobs.
+
+    Two rules, in order:
+      1. If a title appears in a primary list, every copy of it from a
+         "similar jobs" block is dropped — a stub can carry MORE fields than
+         the posting it shadows (a location the real row omits), so richness
+         alone picks the wrong one.
+      2. Within what remains for that title, postings are distinct when their
+         (location, url) differ. Collapsing on title alone would drop a second
+         genuine opening — and System A's job_id is md5(name|title|location),
+         so those are two separate DB rows.
+    """
+    # A stub shadows a posting only when it names the same role in the same
+    # place. Keying rule 1 on the title alone would drop a genuinely different
+    # opening that happens to share a title — and job_id is
+    # md5(name|title|location), so that is a distinct row.
+    primary_locations: dict[str, set[str]] = {}
+    for is_primary, rec in candidates:
+        if is_primary:
+            primary_locations.setdefault(rec["title"].lower(), set()).add(
+                rec["location"].lower()
+            )
+
+    out: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for is_primary, rec in candidates:
+        key_title = rec["title"].lower()
+        key_loc = rec["location"].lower()
+        if not is_primary:
+            known = primary_locations.get(key_title)
+            # Drop a secondary copy only when it cannot be told apart from a
+            # primary one: same place, or either side missing the location that
+            # would distinguish them. A secondary entry naming a different city
+            # is kept — it may be a second real opening.
+            if known is not None and (
+                not key_loc or "" in known or key_loc in known
+            ):
+                continue
+        identity = (key_title, key_loc, canonical(rec["url"]))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        out.append(rec)
+    return out
+
+
+def _jobs_from_next_data(html: str) -> list[dict]:
+    """
+    Best-effort walk of a Next.js __NEXT_DATA__ payload.
+
+    Looks for any list held under a job-ish key whose items are dicts carrying a
+    title. Shapes differ between join.com releases, so every field is optional
+    except the title.
+    """
+    match = _NEXT_DATA_RE.search(html)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(1).strip())
+    except (ValueError, TypeError):
+        return []
+
+    candidates: list[tuple[bool, dict]] = []
+    stack = [(None, data)]
+    while stack:
+        key, node = stack.pop()
+        if isinstance(node, dict):
+            stack.extend(node.items())
+            continue
+        if not isinstance(node, list):
+            continue
+        key_text = str(key or "")
+        job_ish = bool(key and _JOB_LIST_KEY_RE.search(key_text))
+        is_primary = job_ish and not _SECONDARY_JOB_KEY_RE.search(key_text)
+        for item in node:
+            if isinstance(item, list):
+                # Lists nested in lists still have to be walked.
+                stack.append((key, item))
+                continue
+            if not isinstance(item, dict):
+                continue
+            record = _next_data_record(item) if job_ish else None
+            if record is not None:
+                candidates.append((is_primary, record))
+            # Walk into it regardless: a category container ({"name": "Sales",
+            # "jobs": [...]}) both looks like a record and holds the real ones.
+            stack.append((key, item))
+
+    return _dedupe_next_data_records(candidates)
+
+
+def _fetch_join(company: dict) -> list[dict]:
+    """
+    join.com renders its listings client-side, so the plain page text the LLM
+    path sees is useless. Both structured payloads it does ship are tried first;
+    the html path is the fallback if join.com changes shape again.
+    """
+    career_url = company["career_url"]
+    resp = _get_html_career_response(career_url)
+    resp.raise_for_status()
+    html = resp.text
+
+    listings = _jobs_from_jsonld(html)
+    source = "json-ld"
+    if not listings:
+        listings = _jobs_from_next_data(html)
+        source = "__NEXT_DATA__"
+
+    if not listings:
+        logger.info(
+            "  %s: no structured join.com payload — falling back to html extraction",
+            company.get("name"),
+        )
+        return _fetch_html_llm(company)
+
+    logger.debug("  %s: join.com listings via %s", company.get("name"), source)
+
+    jobs = []
+    for item in listings:
+        job_url = item["url"] or career_url
+        details = item["details"]
+        if not details:
+            details = _fetch_detail_text(job_url, career_url)
+            if job_url != career_url:
+                time.sleep(config.REQUEST_DELAY_SECONDS)
+        jobs.append(_build_job(
+            company,
+            title=item["title"],
+            url=job_url,
+            location=item["location"],
+            job_details=details,
+        ))
+    return jobs
+
+
+# ---------------------------------------------------------------------------
 # Generic HTML + LLM listing extractor (Step 1) + detail page fetch (Step 2)
 # ---------------------------------------------------------------------------
 
@@ -325,30 +625,96 @@ class _JobListings(BaseModel):
     jobs: list[_JobListing]
 
 
-def _fetch_html_llm(company: dict) -> list[dict]:
+_PAGE_CACHE_WARNED = False
+
+
+def _warn_page_cache_unavailable(name: str, exc: Exception) -> None:
     """
-    Two-step extraction:
-      Step 1 — LLM extracts job listing (title, url, location) from career page text.
-      Step 2 — For each job with a distinct URL, fetch that page and store the
-               full text as job_details. No second LLM call.
+    Warn once per process, not per company.
+
+    The cache is answered from the DB, so a missing company_page_state table
+    (scripts/migrate_db.py never run) disables it for every company. At DEBUG
+    that is invisible at the runner's INFO level, and the cache silently
+    no-ops forever while still paying for a failed connection per company.
     """
-    career_url = company["career_url"]
+    global _PAGE_CACHE_WARNED
+    if not _PAGE_CACHE_WARNED:
+        _PAGE_CACHE_WARNED = True
+        logger.warning(
+            "Career-page cache unavailable (%s: %s) — every company will be "
+            "re-extracted this run. If company_page_state is missing, run "
+            "scripts/migrate_db.py.",
+            name, exc,
+        )
+    else:
+        logger.debug("  %s: page-hash cache unavailable (%s)", name, exc)
 
-    resp = _get_html_career_response(career_url)
-    resp.raise_for_status()
 
-    soup = BeautifulSoup(resp.text, "lxml")
-    for tag in soup(["script", "style", "nav", "footer", "head", "header"]):
-        tag.decompose()
+def _cached_listing_for_unchanged_page(company: dict, page_hash: str) -> list[dict] | None:
+    """
+    Career pages change monthly, the checker runs daily. When a page's text is
+    byte-identical to the previous run, re-run the extraction from the DB
+    instead of paying for another LLM call: returning the employer's currently
+    active rows marks them re-seen and delists nothing.
 
-    page_text = soup.get_text(separator="\n", strip=True)
-    page_text = page_text[:8000]
+    Returns None to mean "no usable cache — do the real extraction". Every DB
+    error is a cache miss on purpose, so the smoke scripts still run without a
+    database.
+    """
+    if not config.COMPANY_PAGE_HASH_CACHE:
+        return None
 
-    if len(page_text) < 50:
-        logger.debug("  %s: page text too short — likely JS-rendered, skipping",
-                     company.get("name"))
-        return []
+    name = company["name"]
+    try:
+        state = db.get_company_page_state(name)
+        if not state or state.get("page_hash") != page_hash:
+            return None
 
+        checked_on = state.get("checked_on")
+        age_days = (date.today() - checked_on).days if checked_on else None
+        # A negative age means a clock skew wrote a future date; re-extract
+        # rather than trusting the row until that date passes.
+        if (
+            age_days is None
+            or age_days < 0
+            or age_days >= config.COMPANY_PAGE_CACHE_MAX_DAYS
+        ):
+            logger.info(
+                "  %s: cached listing is %s day(s) old — re-extracting",
+                name, age_days,
+            )
+            return None
+
+        rows = db.get_active_jobs_for_employer("company_direct", name)
+    except Exception as exc:
+        _warn_page_cache_unavailable(name, exc)
+        return None
+
+    if not rows:
+        # Nothing to re-confirm; extract again so a page that gained its first
+        # listing between runs is not missed.
+        return None
+
+    logger.info("  %s: career page unchanged — reusing %d cached listing(s)",
+                name, len(rows))
+
+    cached = []
+    for row in rows:
+        job = _build_job(
+            company,
+            title=row.get("title") or "",
+            url=row.get("url") or company["career_url"],
+            location=row.get("location") or "",
+        )
+        # The stored id is authoritative; re-hashing would drift if the row was
+        # written under a different title or location.
+        job["job_id"] = row["job_id"]
+        cached.append(job)
+    return cached
+
+
+def _extract_listings_with_llm(page_text: str, career_url: str) -> list[_JobListing]:
+    """Step 1 — ask the model for the {title, url, location} of every opening."""
     prompt = (
         "Extract all open job listings from the career page text below.\n\n"
         "Rules:\n"
@@ -376,11 +742,51 @@ def _fetch_html_llm(company: dict) -> list[dict]:
     )
 
     listings = response.choices[0].message.parsed
-    if not listings or not listings.jobs:
-        return []
+    return list(listings.jobs) if listings and listings.jobs else []
+
+
+def _fetch_html_llm(company: dict) -> list[dict]:
+    """
+    Two-step extraction:
+      Step 1 — LLM extracts job listing (title, url, location) from career page text.
+      Step 2 — For each job with a distinct URL, fetch that page and store the
+               full text as job_details. No second LLM call.
+
+    Step 1 is skipped entirely while the page text is unchanged since the last
+    run (see _cached_listing_for_unchanged_page).
+    """
+    career_url = company["career_url"]
+
+    resp = _get_html_career_response(career_url)
+    resp.raise_for_status()
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    for tag in soup(["script", "style", "nav", "footer", "head", "header"]):
+        tag.decompose()
+
+    page_text = soup.get_text(separator="\n", strip=True)
+    page_text = page_text[:8000]
+
+    if len(page_text) < 50:
+        raise CompanyFetchError(
+            f"career page has {len(page_text)} chars of text — likely JS-rendered"
+        )
+
+    page_hash = hashlib.md5(page_text.encode("utf-8")).hexdigest()
+    cached = _cached_listing_for_unchanged_page(company, page_hash)
+    if cached is not None:
+        return cached
+
+    listings = _extract_listings_with_llm(page_text, career_url)
+
+    # Only record the hash once extraction succeeded, so a failed run re-tries.
+    try:
+        db.set_company_page_hash(company["name"], page_hash)
+    except Exception as exc:
+        _warn_page_cache_unavailable(company["name"], exc)
 
     jobs = []
-    for item in listings.jobs:
+    for item in listings:
         if not item.title:
             continue
 

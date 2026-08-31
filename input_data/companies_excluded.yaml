@@ -1,0 +1,57 @@
+# Companies considered for the watchlist and deliberately NOT added.
+#
+# This file exists because scripts/sync_companies_from_sheet.py rewrites
+# companies.yaml from the Google Sheet with yaml.dump, which drops every
+# comment — so a rationale recorded there is one sync run away from deletion.
+# Nothing reads this file; it is the record of why these rows are absent, so
+# the next person reconciling the source list does not re-add them.
+
+excluded:
+
+  # ── Industry associations and networks, not employers ────────────────────
+  # Their job pages advertise member companies' roles, so every posting would
+  # be filed under the association's name.
+
+  - name: Pharma Deutschland
+    city: Bonn
+    url: https://www.pharmadeutschland.de/der-verband/stellenangebote/
+    reason: industry association — postings belong to member companies
+
+  - name: PLCD Pharma-Lizenz-Club Deutschland e.V.
+    city: Bonn
+    url: https://plcd.de/stellenausschreibungen/
+    reason: industry association — postings belong to member companies
+
+  - name: Forschungsvereinigung der Arzneimittel-Hersteller e.V. (FAH)
+    city: Bonn
+    url: https://fah-bonn.de/?page_id=1085
+    reason: industry association — postings belong to member companies
+
+  - name: LifeScienceNet Düsseldorf
+    city: Düsseldorf
+    url: ''
+    reason: regional network, and the source list records no website at all
+
+  # ── Already covered elsewhere in the pipeline ────────────────────────────
+
+  - name: Cellex Cell Professionals
+    covered_by: companies.yaml → "Cellex" (recruitee, slug cellexgmbh)
+
+  - name: Klosterfrau Group
+    covered_by: nrw_major_employers.yaml → "Klosterfrau" (successfactors)
+
+  - name: MCM Klosterfrau Vertriebsgesellschaft mbH
+    covered_by: nrw_major_employers.yaml → "Klosterfrau" (same group)
+
+  - name: Viatris
+    covered_by: nrw_major_employers.yaml → "Viatris" (workday_cxs)
+
+  # ── Routed but not yet live ──────────────────────────────────────────────
+
+  - name: Lonza Cologne
+    url: https://www.lonza.com/careers/job-search
+    reason: >-
+      routed to nrw_major_employers.yaml, where it is a commented-out template.
+      Its board's ATS could not be identified, and a guessed configuration
+      reports zero jobs without failing. Not in the watchlist either — do not
+      add it there without first removing that template.

@@ -1,8 +1,8 @@
 """
 Sync input_data/companies.yaml from the Google Sheet company watchlist.
 
-Run this manually whenever you add or edit companies in the sheet.
-It is NOT part of the daily cron chain.
+Run this whenever you add or edit companies in the sheet. deploy/run_pipeline.sh
+also runs it nightly (non-fatally) before run_company_checker.py.
 
 Usage:
     python scripts/sync_companies_from_sheet.py
@@ -31,8 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import logging
 import re
+from urllib.parse import urlparse
 
 import yaml
+
+from scraper.urls import canonical, is_less_specific, strip_tracking_params
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -68,9 +71,85 @@ def _detect_source_type(url: str) -> tuple[str, str | None]:
         # https://{slug}.recruitee.com
         m = re.search(r"https?://([^.]+)\.recruitee\.com", url, re.I)
         return "recruitee", (m.group(1) if m else None)
+    if "join.com" in u:
+        # https://join.com/companies/{slug}
+        m = re.search(r"join\.com/companies/([^/?#]+)", url, re.I)
+        return "join", (m.group(1) if m else None)
     if "myworkdayjobs.com" in u:
         return "html", None   # Workday has no public JSON API
     return "html", None
+
+
+# Legal forms and decorations the sheet spells inconsistently. "Cannamedical
+# Pharma" and "Cannamedical", or "Singleron Biotechnologies HR" and "Singleron
+# Biotechnologies", are the same company; matching on the literal name re-adds
+# them as duplicates that are then scraped twice under two job_id sets.
+# Legal forms and a couple of decorations the sheet spells inconsistently
+# ("… GmbH & Co. KG", "… HR"). Deliberately NOT geographic words: both the
+# sheet and the YAML carry "Germany"/"Europe" identically, so stripping them
+# only risks collapsing a real name to a generic token.
+_NAME_NOISE_RE = re.compile(
+    r"\b(gmbh|mbh|ag|kg|se|ohg|ug|e\.?\s?v|co(mpany)?|group|holding|hr)\b"
+    r"|[®™&.,()]",
+    re.IGNORECASE,
+)
+
+
+def _normalise_name(name: str) -> str:
+    """Comparison key for company identity across sheet/YAML spellings."""
+    cleaned = _NAME_NOISE_RE.sub(" ", name or "")
+    return " ".join(cleaned.split()).strip().lower()
+
+
+def _alias_map(existing: dict[str, dict]) -> dict[str, str]:
+    """
+    Normalised alias -> canonical companies.yaml name.
+
+    Some sheet spellings differ by more than a legal form ("Medios Solutions
+    Bonn", "Cannamedical Biotech"), and two sheet rows were deliberately
+    consolidated into one entry. Those are recorded as an `aliases:` list on
+    the entry rather than guessed.
+    """
+    out: dict[str, str] = {}
+    for name, entry in existing.items():
+        for alias in entry.get("aliases") or []:
+            out[_normalise_name(alias)] = name
+    return out
+
+
+def _blocked_names() -> dict[str, str]:
+    """
+    Normalised name -> why it must never be added to the watchlist.
+
+    companies_excluded.yaml records the companies deliberately left out —
+    industry associations whose postings belong to member firms, recruiters,
+    and rows already covered elsewhere. nrw_major_employers.yaml holds the
+    large employers routed to the other system. Without this, the nightly sync
+    re-adds every one of them from the sheet and quietly reverses the decision.
+    """
+    blocked: dict[str, str] = {}
+
+    def _add(name: str, reason: str) -> None:
+        norm = _normalise_name(name)
+        if not norm:
+            return
+        blocked.setdefault(norm, reason)
+
+    excluded_path = ROOT / "input_data" / "companies_excluded.yaml"
+    if excluded_path.exists():
+        with excluded_path.open(encoding="utf-8") as f:
+            for row in (yaml.safe_load(f) or {}).get("excluded", []):
+                reason = row.get("reason") or row.get("covered_by") or "excluded"
+                _add(row["name"], f"companies_excluded.yaml: {str(reason).strip()[:80]}")
+
+    nrw_path = ROOT / "input_data" / "nrw_major_employers.yaml"
+    if nrw_path.exists():
+        with nrw_path.open(encoding="utf-8") as f:
+            for row in (yaml.safe_load(f) or {}).get("employers", []):
+                _add(row["name"],
+                     f"already scraped as an NRW major ({row.get('source_type')})")
+
+    return blocked
 
 
 def _load_existing() -> dict[str, dict]:
@@ -163,6 +242,11 @@ def _fetch_sheet_rows() -> list[dict]:
     return companies
 
 
+def _sheet_id() -> str:
+    from scraper import config
+    return config.GOOGLE_SHEET_ID
+
+
 def main() -> None:
     logger.info("Loading existing companies.yaml …")
     existing = _load_existing()
@@ -171,20 +255,67 @@ def main() -> None:
     logger.info("Fetching rows from Google Sheet …")
     sheet_companies = _fetch_sheet_rows()
 
+    # Normalise before diffing: the sheet's URLs carry per-click ad parameters,
+    # which would otherwise make an unchanged page look changed every night and
+    # land in the stored job URL.
+    for entry in sheet_companies:
+        entry["career_url"] = strip_tracking_params(entry.get("career_url", ""))
+
     sheet_by_name = {c["name"]: c for c in sheet_companies}
 
-    added   = []
-    changed = []
-    missing = []
+    blocked = _blocked_names()
+    by_norm = {_normalise_name(n): n for n in existing}
+    by_norm.update(_alias_map(existing))
+
+    added       = []
+    added_norms = set()   # norms of companies being added THIS run
+    changed     = []
+    missing     = []
+    refused     = []
+    aliased     = []
+    kept        = []
 
     # Detect new and changed entries
     for name, entry in sheet_by_name.items():
-        if name not in existing:
+        norm = _normalise_name(name)
+
+        if not norm:
+            # A name that is only legal forms/punctuation — cannot be matched
+            # or de-duplicated reliably; treat it as a distinct new row.
             added.append(entry)
-        else:
-            old = existing[name]
-            if old.get("career_url") != entry.get("career_url"):
-                changed.append((old, entry))
+            continue
+
+        if norm in blocked:
+            refused.append((name, blocked[norm]))
+            continue
+
+        # by_norm maps only to names that exist in companies.yaml, so target
+        # is always a real existing entry — never a sheet-only spelling, which
+        # would KeyError at existing[target] below.
+        target = name if name in existing else by_norm.get(norm)
+        if target is None:
+            if norm in added_norms:
+                # A second spelling of a company already being added this run
+                # (e.g. "Acme GmbH" after "Acme"). Fold it in, don't re-add.
+                continue
+            added.append(entry)
+            added_norms.add(norm)
+            continue
+
+        if target != name:
+            aliased.append((name, target))
+        old_entry = existing[target]
+        old_url = old_entry.get("career_url") or ""
+        new_url = entry.get("career_url") or ""
+        if canonical(old_url) == canonical(new_url):
+            continue
+        if is_less_specific(new_url, old_url):
+            # The sheet often holds a homepage (sometimes on a different host
+            # than the researched ATS / jobs. subdomain page); do not walk that
+            # back — and do not flip source_type off join/personio/….
+            kept.append((target, old_url, new_url))
+            continue
+        changed.append((old_entry, entry))
 
     # Detect removed entries
     for name in existing:
@@ -202,6 +333,23 @@ def main() -> None:
         logger.info("\nCHANGED career URLs (%d):", len(changed))
         for old, new in changed:
             logger.info("  ~ %s: %s → %s", old["name"], old["career_url"], new["career_url"])
+
+    if refused:
+        logger.info("\nREFUSED (%d) — deliberately not in the watchlist:", len(refused))
+        for name, why in refused:
+            logger.info("  x %s — %s", name, why)
+
+    if aliased:
+        logger.info("\nMATCHED to an existing entry under another spelling (%d):",
+                    len(aliased))
+        for sheet_name, yaml_name in aliased:
+            logger.info("  = %s → %s", sheet_name, yaml_name)
+
+    if kept:
+        logger.info("\nKEPT the researched career URL over the sheet homepage (%d):",
+                    len(kept))
+        for name, old_url, new_url in kept:
+            logger.info("  = %s: kept %s (sheet has %s)", name, old_url, new_url)
 
     if missing:
         logger.info("\nNOT IN SHEET any more (%d) — NOT removed (manual review required):",
@@ -221,6 +369,14 @@ def main() -> None:
             "career_url":  new["career_url"],
             "source_type": new["source_type"],
         })
+        if old.get("source_type") == "skip" and new["source_type"] != "skip":
+            # A skip row carries a notes: explaining that no career page was
+            # found. Someone putting a Jobs URL in the sheet is re-enabling it
+            # deliberately, so honour that — but drop the note, which is now
+            # false and would otherwise outlive the reason it was written.
+            merged[old["name"]].pop("notes", None)
+            logger.info("  ^ %s re-enabled from skip → %s (sheet now has a Jobs URL)",
+                        old["name"], new["source_type"])
         if new.get("slug"):
             merged[old["name"]]["slug"] = new["slug"]
         elif "slug" in merged[old["name"]] and not new.get("slug"):
@@ -233,7 +389,10 @@ def main() -> None:
     header = (
         "# Company watchlist — NRW pharma/biotech companies with their own career pages.\n"
         "#\n"
-        f"# Populated from: https://docs.google.com/spreadsheets/d/{__import__('scraper.config', fromlist=['config']).config.GOOGLE_SHEET_ID}\n"
+        "# NOTE: this file was last written by sync_companies_from_sheet.py, which\n"
+        "# rewrites it from the sheet and therefore drops any hand-written comments.\n"
+        "#\n"
+        f"# Populated from: https://docs.google.com/spreadsheets/d/{_sheet_id()}\n"
         "# Keep up to date by running: python scripts/sync_companies_from_sheet.py\n\n"
     )
 
