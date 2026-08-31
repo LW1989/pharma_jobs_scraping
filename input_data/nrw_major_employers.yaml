@@ -195,7 +195,11 @@ employers:
       - Troisdorf
       - ''
     workday_cxs_max_list_jobs: 120
-    max_jobs: 40
+    # Per-query page cap; 120 rows at 20/page needs 6, so 10 leaves headroom.
+    # The fetcher raises rather than truncating if a query ever hits it.
+    workday_cxs_max_listing_pages: 10
+    # No max_jobs: anything past that cap would be delisted by the checker,
+    # and workday_cxs_max_list_jobs already bounds the work.
 
   # Lonza Cologne (https://www.lonza.com/careers/job-search) is NOT enabled yet:
   # the board's ATS could not be identified without network access from the

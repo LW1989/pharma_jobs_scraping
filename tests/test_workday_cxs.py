@@ -238,9 +238,11 @@ def _paged(pool, page_size=20):
     return search
 
 
-def test_paging_is_bounded_by_pages_not_by_rows_collected(monkeypatch):
+def test_hitting_the_page_cap_raises_instead_of_truncating_silently(monkeypatch):
     # collected_here only advances for NEW paths, so a query returning rows the
-    # previous one already gave us would otherwise page to the remote total.
+    # previous one already gave us stalls against the page cap. Bounding the
+    # paging is not enough: returning the short union here would delist every
+    # row the caller does not see.
     board = [{"externalPath": f"/job/DE/R{i}", "locationsText": "M"} for i in range(2000)]
     company = {
         **VIATRIS,
@@ -258,12 +260,101 @@ def test_paging_is_bounded_by_pages_not_by_rows_collected(monkeypatch):
     monkeypatch.setattr(nmf, "_workday_cxs_search", search)
     monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
 
-    nmf._workday_cxs_collect_refs(company, "T")
+    with pytest.raises(nmf.WorkdayCxsFetchError):
+        nmf._workday_cxs_collect_refs(company, "T")
 
     dup_pages = [p for p in pages if p[0] == "A"]
-    assert len(dup_pages) <= company.get("workday_cxs_max_listing_pages", 10), (
-        f"duplicate-only query issued {len(dup_pages)} requests"
+    assert len(dup_pages) <= 10, f"duplicate-only query issued {len(dup_pages)} requests"
+
+
+def test_a_board_that_ignores_offset_raises(monkeypatch):
+    # Returning page 1 forever looks like a 20-job board; it is a 120-job board
+    # whose other 100 rows would be delisted.
+    page1 = [{"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"}
+             for i in range(20)]
+    monkeypatch.setattr(
+        nmf, "_workday_cxs_search",
+        lambda c, q, *, offset=0, limit=20: (page1, 120),
     )
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    with pytest.raises(nmf.WorkdayCxsFetchError):
+        nmf.fetch_workday_cxs({**VIATRIS, "workday_cxs_queries": [""],
+                               "workday_cxs_max_list_jobs": 120})
+
+
+def test_a_zero_total_alongside_rows_does_not_stop_paging(monkeypatch):
+    # Some boards stop reporting a count; trusting total==0 truncates to one page.
+    pool = [{"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"}
+            for i in range(60)]
+    monkeypatch.setattr(
+        nmf, "_workday_cxs_search",
+        lambda c, q, *, offset=0, limit=20: (pool[offset:offset + limit], 0),
+    )
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    refs = nmf._workday_cxs_collect_refs(
+        {**VIATRIS, "workday_cxs_queries": [""], "workday_cxs_max_list_jobs": 60}, "T")
+    assert len(refs) == 60, f"stopped after {len(refs)} rows on total=0"
+
+
+def test_partial_payload_drift_raises(monkeypatch):
+    # Half the rows lose externalPath: the other half would be delisted.
+    mixed = [
+        {"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"} if i % 2 == 0
+        else {"jobPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"}
+        for i in range(60)
+    ]
+    monkeypatch.setattr(
+        nmf, "_workday_cxs_search",
+        lambda c, q, *, offset=0, limit=20: (mixed[offset:offset + limit], 60),
+    )
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    with pytest.raises(nmf.WorkdayCxsFetchError):
+        nmf.fetch_workday_cxs({**VIATRIS, "workday_cxs_queries": [""]})
+
+
+def test_one_flaky_detail_fetch_in_twenty_is_tolerated(monkeypatch):
+    postings = [{"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"}
+                for i in range(20)]
+    good = {"title": "QA Manager", "location": "Troisdorf",
+            "country": {"descriptor": "Germany"},
+            "jobDescription": "<p>Standort Troisdorf, Nordrhein-Westfalen.</p>"}
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(postings))
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    def one_bad(company, path):
+        if path == "/job/DE/R7":
+            raise ConnectionError("503")
+        return good
+
+    monkeypatch.setattr(nmf, "_workday_cxs_detail", one_bad)
+
+    assert len(nmf.fetch_workday_cxs(VIATRIS)) == 19
+
+
+def test_failed_detail_fetches_are_throttled_too(monkeypatch):
+    # An unthrottled failure burst is what hammers a struggling board.
+    postings = [{"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"}
+                for i in range(5)]
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(postings))
+
+    def always_bad(company, path):
+        raise ConnectionError("503")
+
+    monkeypatch.setattr(nmf, "_workday_cxs_detail", always_bad)
+    sleeps = []
+    monkeypatch.setattr(nmf.time, "sleep", lambda s: sleeps.append(s))
+
+    with pytest.raises(nmf.WorkdayCxsFetchError):
+        nmf.fetch_workday_cxs(VIATRIS)
+    assert len(sleeps) >= 5, f"only {len(sleeps)} sleeps for 5 failed detail GETs"
+
+
+def test_unknown_source_type_raises_rather_than_delisting():
+    with pytest.raises(ValueError):
+        nmf.fetch_jobs_for_employer({"name": "X", "source_type": "typo_portal"})
 
 
 def test_payload_drift_raises_rather_than_reporting_an_empty_board(monkeypatch):
@@ -381,3 +472,78 @@ def test_more_queries_than_the_budget_still_collects(monkeypatch):
 
     refs = nmf._workday_cxs_collect_refs(company, "T")
     assert len(refs) == 20, f"per-query budget starved every query: {len(refs)}"
+
+
+def test_the_same_posting_returned_by_two_queries_is_collected_once(monkeypatch):
+    shared = [{"externalPath": "/job/DE/R1", "locationsText": "Troisdorf"}]
+    monkeypatch.setattr(
+        nmf, "_workday_cxs_search",
+        lambda c, q, *, offset=0, limit=20: ((shared, 1) if offset == 0 else ([], 1)),
+    )
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    refs = nmf._workday_cxs_collect_refs(
+        {**VIATRIS, "workday_cxs_queries": ["a", "b"]}, "T")
+    assert len(refs) == 1
+
+
+def test_paging_stops_once_the_remote_total_is_reached(monkeypatch):
+    pool = [{"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"} for i in range(25)]
+    pages = []
+
+    def search(c, q, *, offset=0, limit=20):
+        pages.append(offset)
+        return pool[offset:offset + limit], len(pool)
+
+    monkeypatch.setattr(nmf, "_workday_cxs_search", search)
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    nmf._workday_cxs_collect_refs(
+        {**VIATRIS, "workday_cxs_queries": [""], "workday_cxs_max_list_jobs": 120}, "T")
+    assert pages == [0, 20], f"kept paging past the total: {pages}"
+
+
+def test_a_posting_with_no_title_is_skipped(monkeypatch):
+    postings = [{"externalPath": "/job/DE/R1", "locationsText": "Troisdorf"}]
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(postings))
+    monkeypatch.setattr(
+        nmf, "_workday_cxs_detail",
+        lambda c, p: {"title": "", "location": "Troisdorf",
+                      "country": {"descriptor": "Germany"},
+                      "jobDescription": "<p>Standort Troisdorf, Nordrhein-Westfalen.</p>"},
+    )
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    assert nmf.fetch_workday_cxs(VIATRIS) == []
+
+
+def test_page_cap_alone_raises_even_when_drift_detection_would_not(monkeypatch):
+    # Isolates the page-cap guard: every row here is usable, so the payload-drift
+    # check stays silent and only the truncation guard can fire.
+    pool = [{"externalPath": f"/job/DE/R{i}", "locationsText": "Troisdorf"}
+            for i in range(300)]
+    company = {
+        **VIATRIS,
+        "workday_cxs_queries": [""],
+        "workday_cxs_max_list_jobs": 300,
+        "workday_cxs_page_size": 20,
+        "workday_cxs_max_listing_pages": 3,
+    }
+    monkeypatch.setattr(nmf, "_workday_cxs_search", _paged(pool))
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    with pytest.raises(nmf.WorkdayCxsFetchError, match="page cap"):
+        nmf._workday_cxs_collect_refs(company, "T")
+
+
+def test_fortrea_listing_failure_raises_rather_than_delisting(monkeypatch):
+    # Same contract as workday_cxs: fetch_fortrea_clinical feeds the same
+    # delister, and Fortrea holds live rows.
+    def boom(search_text, *, offset=0, limit=20):
+        raise ConnectionError("503 from the Fortrea CXS endpoint")
+
+    monkeypatch.setattr(nmf, "_fortrea_cxs_search", boom)
+    monkeypatch.setattr(nmf.time, "sleep", lambda _s: None)
+
+    with pytest.raises(Exception):
+        nmf.fetch_fortrea_clinical({"name": "Fortrea", "fortrea_search_queries": ["CRA"]})

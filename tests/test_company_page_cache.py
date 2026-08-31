@@ -250,3 +250,28 @@ def test_job_id_distinguishes_two_postings_that_differ_only_by_location():
     a = cs._make_job_id("Testco", "QA Manager", "Köln")
     b = cs._make_job_id("Testco", "QA Manager", "Bonn")
     assert a != b
+
+
+def test_cache_is_served_right_up_to_the_expiry_boundary(monkeypatch):
+    page_hash = _hash_of(monkeypatch, PAGE)
+    boundary = date.today() - timedelta(days=config.COMPANY_PAGE_CACHE_MAX_DAYS - 1)
+    calls, stored = [], []
+    _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW], llm_calls=calls,
+             stored=stored, checked_on=boundary)
+
+    cs.fetch_jobs(COMPANY)
+    assert calls == [], "re-extracted a day early"
+
+    calls2, stored2 = [], []
+    _install(monkeypatch, stored_hash=page_hash, rows=[DB_ROW], llm_calls=calls2,
+             stored=stored2,
+             checked_on=date.today() - timedelta(days=config.COMPANY_PAGE_CACHE_MAX_DAYS))
+    cs.fetch_jobs(COMPANY)
+    assert len(calls2) == 1, "did not re-extract on the expiry day"
+
+
+def test_build_job_falls_back_to_the_company_city_and_country():
+    # The reason a blank city re-keys job_id, and what the Singleron entry rests on.
+    job = cs._build_job(COMPANY, title="QA Manager", url="https://t.example/1", location="")
+    assert job["location"] == "Köln, Germany"
+    assert job["job_id"] == cs._make_job_id("Testco", "QA Manager", "Köln, Germany")

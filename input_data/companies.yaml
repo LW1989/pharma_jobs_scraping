@@ -317,6 +317,9 @@ companies:
     country: Germany
     career_url: https://cannamedical.com/karriere/
     source_type: html
+    aliases:
+      - Cannamedical Pharma
+      - Cannamedical Biotech
 
   - name: enua
     city: Köln
@@ -443,6 +446,8 @@ companies:
     country: Germany
     career_url: https://career.medios.group/stellenportal
     source_type: html
+    aliases:
+      - Medios Solutions Bonn
 
   - name: I&L Biosystems
     city: Troisdorf
@@ -515,6 +520,8 @@ companies:
     country: Germany
     career_url: https://www.medperion.de/en/karriere-bei-uns
     source_type: html
+    aliases:
+      - MEDPERION Sales & Communication
 
   # Part of the Semdor group (above).
   - name: PB Pharma
@@ -522,6 +529,8 @@ companies:
     country: Germany
     career_url: https://www.pbpharma.de/karriere/
     source_type: html
+    aliases:
+      - PB Pharma (semdor)
 
   - name: SynBiotic Distribution
     city: Köln
@@ -610,6 +619,8 @@ companies:
     source_type: skip
     notes: >-
       No career-like link in the served HTML.
+    aliases:
+      - AIRA Pharm GmbH
 
   - name: ROOBS
     city: Köln

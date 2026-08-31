@@ -42,6 +42,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 from scraper import config, db
+from scraper.urls import canonical
 
 logger = logging.getLogger(__name__)
 
@@ -408,12 +409,31 @@ def _jobs_from_jsonld(html: str) -> list[dict]:
 # elsewhere on the page. They match the job-ish key test, so they are read, but
 # a primary list always wins over them.
 _SECONDARY_JOB_KEY_RE = re.compile(
-    r"similar|related|recommend|suggest|other|viewed|nearby", re.IGNORECASE
+    r"similar|related|recommend|suggest|also[-_]?viewed|nearby|elsewhere",
+    re.IGNORECASE,
 )
+
+
+def _is_job_container(item: dict) -> bool:
+    """
+    True when this dict groups jobs rather than being one.
+
+    Category nodes look like a job — {"name": "Engineering", "jobs": [...]} has
+    a name — so the group label would be filed as an opening and the real jobs
+    beneath it hidden behind it.
+    """
+    return any(
+        _JOB_LIST_KEY_RE.search(str(key))
+        and isinstance(value, list)
+        and any(isinstance(v, dict) for v in value)
+        for key, value in item.items()
+    )
 
 
 def _next_data_record(item: dict) -> dict | None:
     """One candidate job from a __NEXT_DATA__ node, or None if it has no title."""
+    if _is_job_container(item):
+        return None
     title = str(item.get("title") or item.get("name") or "").strip()
     if not title:
         return None
@@ -444,17 +464,33 @@ def _dedupe_next_data_records(
          genuine opening — and System A's job_id is md5(name|title|location),
          so those are two separate DB rows.
     """
-    primary_titles = {
-        rec["title"].lower() for is_primary, rec in candidates if is_primary
-    }
+    # A stub shadows a posting only when it names the same role in the same
+    # place. Keying rule 1 on the title alone would drop a genuinely different
+    # opening that happens to share a title — and job_id is
+    # md5(name|title|location), so that is a distinct row.
+    primary_locations: dict[str, set[str]] = {}
+    for is_primary, rec in candidates:
+        if is_primary:
+            primary_locations.setdefault(rec["title"].lower(), set()).add(
+                rec["location"].lower()
+            )
 
     out: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     for is_primary, rec in candidates:
         key_title = rec["title"].lower()
-        if not is_primary and key_title in primary_titles:
-            continue
-        identity = (key_title, rec["location"].lower(), rec["url"])
+        key_loc = rec["location"].lower()
+        if not is_primary:
+            known = primary_locations.get(key_title)
+            # Drop a secondary copy only when it cannot be told apart from a
+            # primary one: same place, or either side missing the location that
+            # would distinguish them. A secondary entry naming a different city
+            # is kept — it may be a second real opening.
+            if known is not None and (
+                not key_loc or "" in known or key_loc in known
+            ):
+                continue
+        identity = (key_title, key_loc, canonical(rec["url"]))
         if identity in seen:
             continue
         seen.add(identity)
@@ -498,10 +534,11 @@ def _jobs_from_next_data(html: str) -> list[dict]:
             if not isinstance(item, dict):
                 continue
             record = _next_data_record(item) if job_ish else None
-            if record is None:
-                stack.append((key, item))
-                continue
-            candidates.append((is_primary, record))
+            if record is not None:
+                candidates.append((is_primary, record))
+            # Walk into it regardless: a category container ({"name": "Sales",
+            # "jobs": [...]}) both looks like a record and holds the real ones.
+            stack.append((key, item))
 
     return _dedupe_next_data_records(candidates)
 

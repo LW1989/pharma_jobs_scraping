@@ -571,12 +571,33 @@ the pipeline so the table exists. A cached listing is re-extracted anyway after
 re-confirmed indefinitely. `COMPANY_PAGE_HASH_CACHE=0` forces full re-extraction;
 `diagnose_pipeline_churn.py` disables it outright.
 
-**Rationales live in fields, not comments.** `scripts/sync_companies_from_sheet.py`
-rewrites `companies.yaml` with `yaml.dump` and drops every comment, so each `skip`
-row carries a `notes:` string instead — an unknown key, which the merge
-(`merged = dict(existing)`) preserves and the runner ignores. The record of
-companies deliberately *not* added lives in `input_data/companies_excluded.yaml`,
-which the sync never touches.
+**The sheet sync is the one thing that can undo all of this.** It runs nightly
+(`deploy/run_pipeline.sh`) immediately before the company checker and rewrites
+`companies.yaml` from the Google Sheet, so anything recorded only as a comment,
+or keyed only on a literal name, does not survive it. Three guards:
+
+- **Exclusions are enforced, not documented.** `_blocked_names()` reads
+  `companies_excluded.yaml` *and* `nrw_major_employers.yaml`, and refuses to add
+  any of those names. Without it, a sheet holding the full research list re-adds
+  all three industry associations, Cellex, Klosterfrau, Lonza and Viatris —
+  reversing two of the decisions this batch was built on, and scraping Viatris
+  and Klosterfrau twice under two `source` values and two `job_id` schemes.
+- **Names are matched on identity, not spelling.** `_normalise_name()` strips
+  legal forms and decorations so `BOLDER Arzneimittel GmbH & Co. KG`,
+  `Medical CNBS® Pharma GmbH` and `Singleron Biotechnologies HR` match their
+  watchlist entries instead of being added a second time. Where no rule can
+  bridge the gap (`Cannamedical Pharma`, `Medios Solutions Bonn`), the entry
+  carries an explicit `aliases:` list.
+- **A researched career URL is never walked back.** The sheet usually holds a
+  homepage or a section index; `is_less_specific()` keeps `/karriere/` over
+  `/`, `/en/karriere-bei-uns` over `/en`, and `/de/karriere` over `/de/home`.
+  Ad-tracking parameters are stripped before anything is compared or stored.
+
+**Rationales live in fields, not comments**, for the same reason: each `skip`
+row carries a `notes:` string, and `aliases:` sits beside it — unknown keys,
+which the merge (`merged = dict(existing)`) preserves and the runner ignores.
+The record of companies deliberately *not* added lives in
+`input_data/companies_excluded.yaml`, which the sync reads but never rewrites.
 
 ### Validation
 

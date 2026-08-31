@@ -1659,8 +1659,11 @@ def _fortrea_collect_job_refs(company: dict, employer: str) -> list[dict]:
                     query, offset=offset, limit=page_size
                 )
             except Exception as exc:
-                logger.warning("%s fortrea search %r: %s", employer, query, exc)
-                break
+                # Not swallowed: breaking here returns a short listing, and
+                # run_nrw_major_checker.py delists every row it does not see.
+                raise WorkdayCxsFetchError(
+                    f"{employer}: fortrea search {query!r} failed — {exc}"
+                ) from exc
             if not batch:
                 break
             new = 0
@@ -1731,7 +1734,10 @@ def fetch_fortrea_clinical(company: dict) -> list[dict]:
             time.sleep(config.REQUEST_DELAY_SECONDS)
         logger.info("%s fortrea: %d eligible job(s)", employer, len(jobs))
     except Exception as exc:
+        # Not swallowed: run_nrw_major_checker.py delists every active row this
+        # does not return, so a failed read must not look like an empty board.
         logger.warning("Fortrea %s: %s", employer, exc)
+        raise
     return jobs
 
 
@@ -1749,7 +1755,12 @@ def fetch_fortrea_clinical(company: dict) -> list[dict]:
 #   workday_cxs_locale    de-DE          (front-end locale for the public URL)
 #   workday_cxs_facets    {Country: [<facet id>]}   passed through as appliedFacets
 #   workday_cxs_queries   ["", "Troisdorf"]         searchText values to union
-#   workday_cxs_max_list_jobs / workday_cxs_page_size / max_jobs
+#   workday_cxs_max_list_jobs   union cap across all queries
+#   workday_cxs_page_size       rows per request
+#   workday_cxs_max_listing_pages  page cap PER QUERY (default 10); raising it
+#                         is the fix when a query legitimately needs more pages
+#   max_jobs              cap on eligible jobs returned; anything beyond it is
+#                         delisted by the caller, so keep it >= the real count
 
 
 def _workday_cxs_host(company: dict) -> str:
@@ -1825,8 +1836,9 @@ def _workday_cxs_public_url(company: dict, external_path: str) -> str:
     return f"https://{_workday_cxs_host(company)}/{locale}/{site}{path}"
 
 
-# A listing that returns rows but no usable paths is schema drift, not an empty
-# board; tolerate a few flaky detail fetches but not a systemic outage.
+# Detail fetches failing at this rate or above mean the board is not readable,
+# not that it has few jobs. Below it, the missing rows are delisted for a day
+# and come back on the next run; above it, a run would delist wholesale.
 _WORKDAY_CXS_MAX_DETAIL_FAILURE_RATIO = 0.2
 
 
@@ -1902,16 +1914,36 @@ def _workday_cxs_collect_refs(company: dict, employer: str) -> list[dict]:
                 len(ordered), total,
             )
             offset += page_size
-            if offset >= total:
+            # total == 0 alongside a non-empty batch means the server is not
+            # reporting a count; trust the batches instead of stopping at once.
+            if total > 0 and offset >= total:
                 break
             time.sleep(config.REQUEST_DELAY_SECONDS)
+        else:
+            # The while-condition ended the loop rather than a break. If that
+            # was the page cap while the query still had budget and unread
+            # results, we are truncating the board — and the caller delists
+            # every row it does not see.
+            if (
+                pages >= max_pages
+                and collected_here < per_query
+                and len(ordered) < max_list
+            ):
+                raise WorkdayCxsFetchError(
+                    f"{employer}: query {query!r} hit the {max_pages}-page cap "
+                    f"after {collected_here} of {per_query} rows — listing "
+                    "truncated (raise workday_cxs_max_listing_pages, or the "
+                    "board is not honouring offset)"
+                )
         if len(ordered) >= max_list:
             break
 
-    if rows_returned and not ordered:
+    # Partial drift is as dangerous as total drift: half a listing still
+    # delists the half it dropped.
+    if rows_returned and len(ordered) < rows_returned / 2:
         raise WorkdayCxsFetchError(
-            f"{employer}: listing returned {rows_returned} row(s) but no usable "
-            "externalPath — the CXS payload shape has changed"
+            f"{employer}: only {len(ordered)} of {rows_returned} listing row(s) "
+            "carried a usable externalPath — the CXS payload shape has changed"
         )
     return ordered[:max_list]
 
@@ -1949,6 +1981,11 @@ def fetch_workday_cxs(company: dict) -> list[dict]:
     detail_failures = 0
     for posting in refs:
         if len(jobs) >= max_jobs:
+            logger.warning(
+                "%s workday_cxs: stopping at max_jobs=%d with %d listing ref(s) "
+                "left — any eligible job beyond this cap will be delisted",
+                employer, max_jobs, len(refs) - refs.index(posting),
+            )
             break
         external_path = (posting.get("externalPath") or "").strip()
         if not external_path:
@@ -1984,10 +2021,8 @@ def fetch_workday_cxs(company: dict) -> list[dict]:
             continue
         jobs.append(_build_row(employer, title, job_url, loc[:200], body))
 
-    if detail_failures and (
-        detail_failures >= max(
-            1, int(detail_attempts * _WORKDAY_CXS_MAX_DETAIL_FAILURE_RATIO)
-        )
+    if detail_attempts and (
+        detail_failures / detail_attempts >= _WORKDAY_CXS_MAX_DETAIL_FAILURE_RATIO
     ):
         raise WorkdayCxsFetchError(
             f"{employer}: {detail_failures} of {detail_attempts} workday_cxs "
@@ -2028,5 +2063,5 @@ def fetch_jobs_for_employer(company: dict) -> list[dict]:
         return fetch_syneos_clinical(company)
     if st == "fortrea_clinical":
         return fetch_fortrea_clinical(company)
-    logger.warning("Unknown NRW employer source_type: %s", st)
-    return []
+    # Returning [] here would delist the employer's whole job set over a typo.
+    raise ValueError(f"Unknown NRW employer source_type: {st!r}")

@@ -185,3 +185,52 @@ def test_two_real_postings_sharing_a_title_both_survive():
 
 def test_lists_nested_inside_lists_are_still_walked():
     assert [j["title"] for j in _jobs_from_next_data(NESTED_PAGE)] == ["Buried Job"]
+
+
+def test_only_jobposting_typed_jsonld_is_read():
+    # An Organization or BreadcrumbList with a "title" must not become a job.
+    page = """<script type="application/ld+json">
+    {"@type":"Organization","title":"enua GmbH","url":"https://enua.de"}</script>
+    <script type="application/ld+json">
+    {"@type":"JobPosting","title":"QA Manager","url":"https://join.com/1"}</script>"""
+    assert [j["title"] for j in _jobs_from_jsonld(page)] == ["QA Manager"]
+
+
+def test_a_record_without_a_title_falls_back_to_name():
+    # Some join.com releases label the field "name".
+    page = ('<script id="__NEXT_DATA__">{"props":{"jobs":'
+            '[{"name":"Lab Technician","url":"https://join.com/7"}]}}</script>')
+    assert [j["title"] for j in _jobs_from_next_data(page)] == ["Lab Technician"]
+
+
+def test_records_differing_only_by_url_are_kept_apart():
+    page = ('<script id="__NEXT_DATA__">{"props":{"jobs":['
+            '{"title":"QA Manager","location":"Köln","url":"https://join.com/1"},'
+            '{"title":"QA Manager","location":"Köln","url":"https://join.com/2"}]}}</script>')
+    assert len(_jobs_from_next_data(page)) == 2
+
+
+def test_the_same_url_with_tracking_noise_is_one_record():
+    page = ('<script id="__NEXT_DATA__">{"props":{"jobs":['
+            '{"title":"QA Manager","location":"Köln","url":"https://join.com/1"},'
+            '{"title":"QA Manager","location":"Köln","url":"https://join.com/1?gclid=X"}]}}</script>')
+    assert len(_jobs_from_next_data(page)) == 1
+
+
+def test_two_postings_sharing_a_title_and_lacking_urls_are_kept_apart():
+    # Location is the only thing telling them apart, and job_id includes it.
+    page = ('<script id="__NEXT_DATA__">{"props":{"jobs":['
+            '{"title":"QA Manager","location":"Köln"},'
+            '{"title":"QA Manager","location":"Bonn"}]}}</script>')
+    jobs = _jobs_from_next_data(page)
+    assert {j["location"] for j in jobs} == {"Köln", "Bonn"}
+
+
+def test_a_category_container_is_not_reported_as_a_job():
+    # {"name": "Engineering", "jobs": [...]} has a name, so it looks like a
+    # posting; filing it as one also hides the real jobs beneath it.
+    page = ('<script id="__NEXT_DATA__">{"props":{"jobCategories":['
+            '{"name":"Engineering","jobs":[{"title":"Real 1"},{"title":"Real 2"}]},'
+            '{"name":"Sales","jobs":[{"title":"Real 3"}]}]}}</script>')
+    titles = {j["title"] for j in _jobs_from_next_data(page)}
+    assert titles == {"Real 1", "Real 2", "Real 3"}

@@ -3,33 +3,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_HOST = os.environ["DB_HOST"]
-DB_PORT = int(os.environ.get("DB_PORT", 5432))
-DB_NAME = os.environ["DB_NAME"]
-DB_USER = os.environ["DB_USER"]
-DB_PASSWORD = os.environ["DB_PASSWORD"]
-
-# OpenAI — required only when running run_evaluator.py
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
-
-# Email — required only when running run_reporter.py
-SMTP_HOST     = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT     = int(os.environ.get("SMTP_PORT", 587))
-SMTP_USER     = os.environ.get("SMTP_USER", "")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-REPORT_TO     = os.environ.get("REPORT_TO", "")   # comma-separated recipients
-
-# Telegram — required only when running run_reporter.py
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
-
-# Local pipeline test: skip email/Telegram/mark_sent (run_reporter.py)
-REPORTER_DRY_RUN = os.environ.get("REPORTER_DRY_RUN", "").lower() in (
-    "1",
-    "true",
-    "yes",
-)
 
 def env_flag(raw: str | None, default: bool) -> bool:
     """
@@ -56,6 +29,30 @@ def env_int(raw: str | None, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
+DB_HOST = os.environ["DB_HOST"]
+DB_PORT = env_int(os.environ.get("DB_PORT"), 5432)
+DB_NAME = os.environ["DB_NAME"]
+DB_USER = os.environ["DB_USER"]
+DB_PASSWORD = os.environ["DB_PASSWORD"]
+
+# OpenAI — required only when running run_evaluator.py
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+
+# Email — required only when running run_reporter.py
+SMTP_HOST     = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT     = env_int(os.environ.get("SMTP_PORT"), 587)
+SMTP_USER     = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+REPORT_TO     = os.environ.get("REPORT_TO", "")   # comma-separated recipients
+
+# Telegram — required only when running run_reporter.py
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# Local pipeline test: skip email/Telegram/mark_sent (run_reporter.py)
+REPORTER_DRY_RUN = env_flag(os.environ.get("REPORTER_DRY_RUN"), False)
 
 # Company watchlist: skip the listing LLM call when a career page's text is
 # byte-identical to the previous run. 1/true/yes/on enable it (the default),
@@ -122,9 +119,9 @@ REQUEST_TIMEOUT_SECONDS = 30
 
 # Company checker: some hosts advertise broken IPv6 (connect timeout from VPS).
 # Set COMPANY_SCRAPER_FORCE_IPV4=1 in .env to force IPv4 for all watchlist HTTP.
-COMPANY_SCRAPER_FORCE_IPV4 = os.environ.get(
-    "COMPANY_SCRAPER_FORCE_IPV4", ""
-).lower() in ("1", "true", "yes")
+COMPANY_SCRAPER_FORCE_IPV4 = env_flag(
+    os.environ.get("COMPANY_SCRAPER_FORCE_IPV4"), False
+)
 
 HEADERS = {
     "User-Agent": (
