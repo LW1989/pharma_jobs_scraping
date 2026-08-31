@@ -310,8 +310,9 @@ def main() -> None:
         if canonical(old_url) == canonical(new_url):
             continue
         if is_less_specific(new_url, old_url):
-            # The sheet often holds a homepage or a section index where someone
-            # has since found the actual listing page; do not walk that back.
+            # The sheet often holds a homepage (sometimes on a different host
+            # than the researched ATS / jobs. subdomain page); do not walk that
+            # back — and do not flip source_type off join/personio/….
             kept.append((target, old_url, new_url))
             continue
         changed.append((old_entry, entry))

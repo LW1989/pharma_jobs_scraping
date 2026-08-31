@@ -59,6 +59,24 @@ def test_is_less_specific_matches_hosts_case_insensitively():
     assert is_less_specific("https://ACME.de", "https://acme.de/karriere")
 
 
+def test_is_less_specific_ignores_www_for_same_site_paths():
+    # www vs apex is the same site; a bare apex must not displace /karriere.
+    assert is_less_specific("https://pbpharma.de", "https://www.pbpharma.de/karriere/")
+    assert is_less_specific("https://www.pbpharma.de", "https://pbpharma.de/karriere/")
+
+
+def test_is_less_specific_keeps_ats_and_career_subdomains_over_homepages():
+    # The sheet stores the company homepage; YAML holds a researched board.
+    # A host mismatch must not be read as a genuine change.
+    assert is_less_specific("https://www.enua.de", "https://join.com/companies/enua")
+    assert is_less_specific("https://www.allucent.com", "https://apply.workable.com/allucent/")
+    assert is_less_specific("https://prosion.de", "https://prosion-gmbh.jobs.personio.de")
+    assert is_less_specific("https://www.medios.group",
+                            "https://career.medios.group/stellenportal")
+    assert is_less_specific("https://www.il-biosystems.com",
+                            "https://jobs.il-biosystems.com")
+
+
 def test_is_less_specific_compares_whole_path_segments():
     # A coincidental character prefix where neither path is a career page must
     # not read as a downgrade: /cart is not a deeper form of /car.
@@ -68,8 +86,11 @@ def test_is_less_specific_compares_whole_path_segments():
 
 
 def test_is_less_specific_accepts_a_genuine_change():
-    # A different host is a real move, not a downgrade.
+    # A different *career* host is a real move, not a downgrade.
     assert not is_less_specific("https://jobs.acme.de/", "https://acme.de/karriere")
+    # Moving from one ATS board to another is also a real move.
+    assert not is_less_specific("https://apply.workable.com/acme/",
+                                "https://join.com/companies/acme")
     # A more specific path is an improvement.
     assert not is_less_specific("https://acme.de/karriere/stellen",
                                 "https://acme.de/karriere")
@@ -182,6 +203,20 @@ def test_the_sheet_homepage_does_not_overwrite_a_researched_career_url(monkeypat
         return
     entry = [c for c in yaml.safe_load(text)["companies"] if c["name"] == "PB Pharma"][0]
     assert entry["career_url"] == "https://www.pbpharma.de/karriere/"
+
+
+def test_sheet_homepage_does_not_overwrite_a_join_ats_url(monkeypatch):
+    import yaml
+
+    # enua's researched board is on join.com; the sheet usually holds the
+    # company homepage. That host mismatch must not flip source_type off join.
+    text = _run(monkeypatch, [_row("enua", "https://www.enua.de", "Köln")])
+    if text is None:
+        return
+    entry = [c for c in yaml.safe_load(text)["companies"] if c["name"] == "enua"][0]
+    assert entry["career_url"] == "https://join.com/companies/enua"
+    assert entry["source_type"] == "join"
+    assert entry.get("slug") == "enua"
 
 
 def test_notes_and_aliases_survive_a_sync(monkeypatch):
