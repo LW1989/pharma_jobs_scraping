@@ -84,9 +84,13 @@ def _detect_source_type(url: str) -> tuple[str, str | None]:
 # Pharma" and "Cannamedical", or "Singleron Biotechnologies HR" and "Singleron
 # Biotechnologies", are the same company; matching on the literal name re-adds
 # them as duplicates that are then scraped twice under two job_id sets.
+# Legal forms and a couple of decorations the sheet spells inconsistently
+# ("… GmbH & Co. KG", "… HR"). Deliberately NOT geographic words: both the
+# sheet and the YAML carry "Germany"/"Europe" identically, so stripping them
+# only risks collapsing a real name to a generic token.
 _NAME_NOISE_RE = re.compile(
-    r"\b(gmbh|mbh|ag|kg|se|ohg|ug|e\.?\s?v|co(mpany)?|group|holding|"
-    r"deutschland|germany|europe|international|hr)\b|[®™&.,()]",
+    r"\b(gmbh|mbh|ag|kg|se|ohg|ug|e\.?\s?v|co(mpany)?|group|holding|hr)\b"
+    r"|[®™&.,()]",
     re.IGNORECASE,
 )
 
@@ -125,23 +129,25 @@ def _blocked_names() -> dict[str, str]:
     """
     blocked: dict[str, str] = {}
 
+    def _add(name: str, reason: str) -> None:
+        norm = _normalise_name(name)
+        if not norm:
+            return
+        blocked.setdefault(norm, reason)
+
     excluded_path = ROOT / "input_data" / "companies_excluded.yaml"
     if excluded_path.exists():
         with excluded_path.open(encoding="utf-8") as f:
             for row in (yaml.safe_load(f) or {}).get("excluded", []):
                 reason = row.get("reason") or row.get("covered_by") or "excluded"
-                blocked[_normalise_name(row["name"])] = (
-                    f"companies_excluded.yaml: {str(reason).strip()[:80]}"
-                )
+                _add(row["name"], f"companies_excluded.yaml: {str(reason).strip()[:80]}")
 
     nrw_path = ROOT / "input_data" / "nrw_major_employers.yaml"
     if nrw_path.exists():
         with nrw_path.open(encoding="utf-8") as f:
             for row in (yaml.safe_load(f) or {}).get("employers", []):
-                blocked.setdefault(
-                    _normalise_name(row["name"]),
-                    f"already scraped as an NRW major ({row.get('source_type')})",
-                )
+                _add(row["name"],
+                     f"already scraped as an NRW major ({row.get('source_type')})")
 
     return blocked
 
@@ -271,6 +277,12 @@ def main() -> None:
     # Detect new and changed entries
     for name, entry in sheet_by_name.items():
         norm = _normalise_name(name)
+
+        if not norm:
+            # A name that is only legal forms/punctuation — cannot be matched
+            # or de-duplicated reliably; treat it as a distinct new row.
+            added.append(entry)
+            continue
 
         if norm in blocked:
             refused.append((name, blocked[norm]))

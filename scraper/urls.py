@@ -28,10 +28,6 @@ def strip_tracking_params(url: str) -> str:
     return urlunparse(parts._replace(fragment=""))
 
 
-def is_bare_homepage(url: str) -> bool:
-    """True when the URL has no meaningful path (scheme://host, or host/)."""
-    return not urlparse(url or "").path.strip("/")
-
 
 _CAREER_PATH_RE = re.compile(
     r"karriere|career|jobs?|stellen|vacanc|bewerb|mit-?uns-?arbeiten", re.IGNORECASE
@@ -52,10 +48,14 @@ def is_less_specific(candidate: str, current: str) -> bool:
     back — but it must still accept a genuinely different URL.
     """
     cand, cur = urlparse(canonical(candidate)), urlparse(canonical(current))
-    if not cur.path or cand.netloc != cur.netloc:
+    if not cur.path.strip("/") or cand.netloc.lower() != cur.netloc.lower():
         return False
-    if cur.path.startswith(cand.path):
-        # "" or "/en" against "/en/karriere-bei-uns"
+    cand_segs = [seg for seg in cand.path.split("/") if seg]
+    cur_segs = [seg for seg in cur.path.split("/") if seg]
+    if cur_segs[: len(cand_segs)] == cand_segs and len(cur_segs) > len(cand_segs):
+        # "" or ["en"] against ["en", "karriere-bei-uns"] — ours is deeper on
+        # the same path. Segment-wise so /car does not read as a prefix of
+        # /career.
         return True
     # Neither contains the other: keep ours only if ours looks like a career
     # page and theirs does not (e.g. /de/karriere vs /de/home).

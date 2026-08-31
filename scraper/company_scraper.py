@@ -414,20 +414,36 @@ _SECONDARY_JOB_KEY_RE = re.compile(
 )
 
 
+# Fields only a real posting carries. A category label ({"name": "Sales",
+# "jobs": [...]}) has none of them; a genuine posting that merely lists related
+# roles ({"title": "RA Manager", "url": ..., "similarJobs": [...]}) has at least
+# one, so it must not be mistaken for a container and dropped.
+_POSTING_FIELDS = ("url", "link", "permalink", "description", "descriptionHtml",
+                   "location", "city")
+
+
 def _is_job_container(item: dict) -> bool:
     """
-    True when this dict groups jobs rather than being one.
+    True when this dict only groups other jobs rather than being one itself.
 
     Category nodes look like a job — {"name": "Engineering", "jobs": [...]} has
     a name — so the group label would be filed as an opening and the real jobs
-    beneath it hidden behind it.
+    beneath it hidden behind it. But a real posting may itself carry a job-ish
+    sub-list (similarJobs, relatedPositions); it is told apart by having posting
+    fields of its own.
     """
-    return any(
+    has_job_sublist = any(
         _JOB_LIST_KEY_RE.search(str(key))
         and isinstance(value, list)
         and any(isinstance(v, dict) for v in value)
         for key, value in item.items()
     )
+    if not has_job_sublist:
+        return False
+    has_own_posting_fields = any(
+        str(item.get(f) or "").strip() for f in _POSTING_FIELDS
+    )
+    return not has_own_posting_fields
 
 
 def _next_data_record(item: dict) -> dict | None:

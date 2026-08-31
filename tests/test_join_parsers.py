@@ -234,3 +234,32 @@ def test_a_category_container_is_not_reported_as_a_job():
             '{"name":"Sales","jobs":[{"title":"Real 3"}]}]}}</script>')
     titles = {j["title"] for j in _jobs_from_next_data(page)}
     assert titles == {"Real 1", "Real 2", "Real 3"}
+
+
+def test_a_real_posting_that_lists_related_roles_keeps_its_own_title():
+    # A genuine posting may embed a similarJobs/relatedPositions list. It must
+    # not be mistaken for a category container and dropped in favour of its stub
+    # — that would delist the real job and insert the stub in its place.
+    page = ('<script id="__NEXT_DATA__">{"props":{"jobs":['
+            '{"title":"Regulatory Affairs Manager","url":"https://join.com/1",'
+            '"location":"Köln","similarJobs":[{"title":"QA Specialist","url":"https://join.com/99"}]},'
+            '{"title":"Clinical Data Manager","url":"https://join.com/2","location":"Bonn"}]}}</script>')
+    titles = {j["title"] for j in _jobs_from_next_data(page)}
+    assert "Regulatory Affairs Manager" in titles
+    assert "Clinical Data Manager" in titles
+
+
+def test_a_pure_category_label_with_no_posting_fields_is_still_suppressed():
+    page = ('<script id="__NEXT_DATA__">{"props":{"openings":['
+            '{"name":"Engineering","jobs":[{"title":"Real 1","url":"/1"}]}]}}</script>')
+    assert [j["title"] for j in _jobs_from_next_data(page)] == ["Real 1"]
+
+
+def test_a_secondary_opening_in_a_different_city_is_kept():
+    # similarJobs usually shadows a primary posting, but when it names a
+    # different location it is a distinct job_id and must survive.
+    page = ('<script id="__NEXT_DATA__">{"props":{'
+            '"jobs":[{"title":"CRA","url":"https://join.com/1","location":"Köln"}],'
+            '"similarJobs":[{"title":"CRA","url":"https://join.com/2","location":"Bonn"}]}}</script>')
+    locs = {j["location"] for j in _jobs_from_next_data(page)}
+    assert locs == {"Köln", "Bonn"}

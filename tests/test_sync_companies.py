@@ -54,6 +54,19 @@ def test_is_less_specific_recognises_a_weaker_url():
                             "https://www.synbiotic.com/de/karriere")
 
 
+def test_is_less_specific_matches_hosts_case_insensitively():
+    # A homepage downgrade with a differently-cased host must still be caught.
+    assert is_less_specific("https://ACME.de", "https://acme.de/karriere")
+
+
+def test_is_less_specific_compares_whole_path_segments():
+    # A coincidental character prefix where neither path is a career page must
+    # not read as a downgrade: /cart is not a deeper form of /car.
+    assert not is_less_specific("https://acme.de/car", "https://acme.de/cart")
+    # But a real deeper segment still is.
+    assert is_less_specific("https://acme.de/car", "https://acme.de/car/details")
+
+
 def test_is_less_specific_accepts_a_genuine_change():
     # A different host is a real move, not a downgrade.
     assert not is_less_specific("https://jobs.acme.de/", "https://acme.de/karriere")
@@ -229,3 +242,51 @@ def test_a_new_company_is_stored_without_tracking_params(monkeypatch):
     entry = [c for c in yaml.safe_load(text)["companies"]
              if c["name"] == "Brand New GmbH"][0]
     assert entry["career_url"] == "https://brandnew.de/karriere"
+
+
+def test_normalise_name_is_case_insensitive():
+    # A CELLEX-vs-Cellex sheet/YAML mismatch must not add a duplicate.
+    assert sync._normalise_name("CELLEX GmbH") == sync._normalise_name("Cellex")
+    assert sync._normalise_name("KLOSTERFRAU GROUP") == sync._normalise_name("Klosterfrau Group")
+
+
+def test_normalise_name_strips_the_group_and_hr_tokens():
+    assert sync._normalise_name("Klosterfrau Group") == sync._normalise_name("Klosterfrau")
+    assert sync._normalise_name("Singleron Biotechnologies HR") == \
+        sync._normalise_name("Singleron Biotechnologies")
+
+
+def test_geographic_words_are_kept_so_block_keys_stay_specific():
+    # "Pharma Deutschland" must block as itself, not as the bare token "pharma".
+    assert sync._normalise_name("Pharma Deutschland") == "pharma deutschland"
+    blocked = sync._blocked_names()
+    assert "pharma" not in blocked
+    assert sync._normalise_name("Pharma Deutschland") in blocked
+
+
+def test_detect_source_type_routes_each_known_ats():
+    assert sync._detect_source_type("https://apply.workable.com/allucent/") == ("workable", "allucent")
+    assert sync._detect_source_type("https://cellexgmbh.recruitee.com") == ("recruitee", "cellexgmbh")
+    assert sync._detect_source_type("https://prosion-gmbh.jobs.personio.de") == ("personio", "prosion-gmbh")
+    assert sync._detect_source_type("https://join.com/companies/enua") == ("join", "enua")
+    assert sync._detect_source_type("https://acme.de/karriere") == ("html", None)
+    assert sync._detect_source_type("") == ("skip", None)
+
+
+def test_names_that_normalise_to_nothing_do_not_collide(monkeypatch):
+    import yaml
+
+    # Two malformed sheet rows made only of legal forms both normalise to "".
+    # They must not be treated as the same company (which would drop one) or
+    # block anything.
+    text = _run(monkeypatch, [
+        _row("GmbH", "https://one.example/karriere"),
+        _row("AG", "https://two.example/karriere"),
+    ])
+    assert text is not None
+    names = [c["name"] for c in yaml.safe_load(text)["companies"]]
+    assert "GmbH" in names and "AG" in names
+
+
+def test_an_empty_normal_is_never_a_block_key():
+    assert "" not in sync._blocked_names()
