@@ -267,12 +267,13 @@ def main() -> None:
     by_norm = {_normalise_name(n): n for n in existing}
     by_norm.update(_alias_map(existing))
 
-    added    = []
-    changed  = []
-    missing  = []
-    refused  = []
-    aliased  = []
-    kept     = []
+    added       = []
+    added_norms = set()   # norms of companies being added THIS run
+    changed     = []
+    missing     = []
+    refused     = []
+    aliased     = []
+    kept        = []
 
     # Detect new and changed entries
     for name, entry in sheet_by_name.items():
@@ -288,10 +289,17 @@ def main() -> None:
             refused.append((name, blocked[norm]))
             continue
 
+        # by_norm maps only to names that exist in companies.yaml, so target
+        # is always a real existing entry — never a sheet-only spelling, which
+        # would KeyError at existing[target] below.
         target = name if name in existing else by_norm.get(norm)
         if target is None:
+            if norm in added_norms:
+                # A second spelling of a company already being added this run
+                # (e.g. "Acme GmbH" after "Acme"). Fold it in, don't re-add.
+                continue
             added.append(entry)
-            by_norm[norm] = name          # a later spelling must not re-add it
+            added_norms.add(norm)
             continue
 
         if target != name:

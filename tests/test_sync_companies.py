@@ -290,3 +290,19 @@ def test_names_that_normalise_to_nothing_do_not_collide(monkeypatch):
 
 def test_an_empty_normal_is_never_a_block_key():
     assert "" not in sync._blocked_names()
+
+
+def test_two_new_rows_sharing_a_normalised_name_do_not_crash_or_double_add(monkeypatch):
+    import yaml
+
+    # A brand-new company entered under two spellings before anyone consolidates
+    # it. The second row used to resolve to the first's sheet name and KeyError
+    # on existing[target]; it must fold into one added entry instead.
+    text = _run(monkeypatch, [
+        _row("Brandnew Bio", "https://bn.example/karriere"),
+        _row("Brandnew Bio GmbH", "https://bn.example/karriere"),
+    ])
+    assert text is not None
+    added = [c["name"] for c in yaml.safe_load(text)["companies"]
+             if c["name"].startswith("Brandnew")]
+    assert added == ["Brandnew Bio"], added
